@@ -6,15 +6,28 @@ import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
 import { errors, log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
+import {
+  estimateWindowStartMs,
+  type GatewayMonthlyCost,
+  gatewayMonthlySpendUsd,
+  parseGatewayMonthlyCost,
+  resolveCostEstimateLagSeconds,
+  utcMonthKey,
+} from './ai-cost-estimate';
 import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
 // Cycle with ai-token-budget.ts (it re-exports this module); both sides use the other's functions
 // only inside function bodies, so evaluation order does not matter.
-import { getProviderUsage } from './ai-token-budget';
+import { getProviderUsage, type TokenBudget } from './ai-token-budget';
+import { buildBudgetDateKey, getBudgetCounter } from './ai-token-budget-counter-client';
 import type { AiProxyEnv } from './env';
 import type { AiProxyPorts } from './ports';
 
-/** The part of the ports the cap reads: the installation-wide ceiling. */
-export type MonthlyCostCeilingPort = Pick<AiProxyPorts, 'monthlyCostCeilingUsd'>;
+/**
+ * The part of the ports the cap reads: the installation-wide ceiling, and on gateway installs the
+ * estimate lag margin (absent means the default, `DEFAULT_COST_ESTIMATE_GATEWAY_LAG_SECONDS`).
+ */
+export type MonthlyCostCeilingPort = Pick<AiProxyPorts, 'monthlyCostCeilingUsd'> &
+  Partial<Pick<AiProxyPorts, 'costEstimateGatewayLagSeconds'>>;
 
 // =============================================================================
 // Monthly Cost Cap Enforcement (KV-cached, written by cron)
@@ -27,16 +40,23 @@ export function buildMonthlyCostCacheKey(userId: string): string {
   return `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
 }
 
-/** Read a user's cached monthly AI cost from KV. Returns null if not cached yet. */
+/**
+ * Read the gateway month total the hourly cron wrote, with when it was read. Null when there is
+ * none yet, or the value is unreadable.
+ */
+export async function getCachedGatewayMonthlyCost(
+  kv: KVNamespace,
+  userId: string
+): Promise<GatewayMonthlyCost | null> {
+  return parseGatewayMonthlyCost(await kv.get(buildMonthlyCostCacheKey(userId)));
+}
+
+/** A user's cached gateway month total in USD (either KV format), or null when not cached yet. */
 export async function getCachedMonthlyCost(
   kv: KVNamespace,
   userId: string
 ): Promise<number | null> {
-  const key = buildMonthlyCostCacheKey(userId);
-  const raw = await kv.get(key);
-  if (raw === null) return null;
-  const parsed = parseFloat(raw);
-  return Number.isNaN(parsed) ? null : parsed;
+  return (await getCachedGatewayMonthlyCost(kv, userId))?.costUsd ?? null;
 }
 
 export interface MonthlyCostCapCheck {
@@ -70,27 +90,23 @@ export function effectiveMonthlyCostCapUsd(
 }
 
 /**
- * The installation-wide ceiling where it applies, or null. It applies only where SAM meters spend
- * itself (no addressable AI Gateway): there it is the operator's only bound on what approved users
- * can spend of the platform key. With a gateway the spend record is the gateway's, and this is not
- * read at all, so the gateway path's I/O is unchanged.
+ * The installation-wide per-user ceiling, or null when none is set. It applies on every install:
+ * without a gateway it bounds SAM's own priced total, with one the gateway total plus the recent
+ * estimate (`checkGatewayCostAdmission`). It bounds platform-funded calls only.
  *
  * An unreadable ceiling is unknown, not disabled. Refuse platform-funded calls until the
- * settings snapshot can be read again; the Gateway path never reads this setting.
+ * settings snapshot can be read again.
  */
 export async function resolveMonthlyCostCeilingUsd(
-  env: AiProxyEnv,
+  _env: AiProxyEnv,
   ports: MonthlyCostCeilingPort
 ): Promise<number | null> {
-  if (!hasLocalAiCostMetering(env)) return null;
   try {
     const ceiling = await ports.monthlyCostCeilingUsd();
     return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
   } catch {
     log.error('ai_proxy.monthly_cost_ceiling_unreadable');
-    throw errors.serviceUnavailable(
-      'AI spending limits are unavailable. Please try again later.'
-    );
+    throw errors.serviceUnavailable('AI spending limits are unavailable. Please try again later.');
   }
 }
 
@@ -125,66 +141,138 @@ export async function getLocalMonthlyAiCostUsd(
   return entries.reduce((sum, entry) => sum + (entry.estimatedCostUsd || 0), 0);
 }
 
+export interface MonthlyCostCapOptions {
+  /** False only for a resolved passthrough credential the user owns; the ceiling then does not apply. */
+  platformBilled?: boolean;
+}
+
 /**
  * Check whether a user is within their monthly cost cap.
  *
- * With AI Gateway: reads the KV cache written by the hourly gateway-log cron. With no cache yet
- * the check passes (fail-open); the cron fills it within the hour, and the daily token budget
- * still applies. The installation ceiling is not read on this path.
+ * The cap is `effectiveMonthlyCostCapUsd(user cap, installation ceiling)` on every install; the
+ * ceiling is left out only for a user-funded passthrough call (`platformBilled === false`).
  *
- * Without AI Gateway: the cap is `effectiveMonthlyCostCapUsd(user cap, installation ceiling)`,
- * compared with SAM's own priced total for the month (`getLocalMonthlyAiCostUsd`), which every
- * platform-billed proxy call and SAM agent call adds to after its response. A failed read refuses
- * the call (fail closed): there is no cron to correct it later.
+ * With AI Gateway: see `checkGatewayCostAdmission`.
+ *
+ * Without AI Gateway: compared with SAM's own priced total for the month
+ * (`getLocalMonthlyAiCostUsd`), which every platform-billed proxy call and SAM agent call adds to
+ * after its response. A failed read refuses the call (fail closed): there is no cron to correct
+ * it later.
  *
  * Spend is known only after a response, so this pre-call check is the last point before money is
  * spent; concurrent calls admitted together can each overshoot by at most their own cost.
- *
- * A gateway without the account API cannot be priced: not enforceable, no KV read.
  */
 export async function checkMonthlyCostCap(
   kv: KVNamespace,
   userId: string,
   env: AiProxyEnv,
-  ports: MonthlyCostCeilingPort
+  ports: MonthlyCostCeilingPort,
+  options?: MonthlyCostCapOptions
 ): Promise<MonthlyCostCapCheck> {
+  if (!hasLocalAiCostMetering(env)) {
+    return (await checkGatewayCostAdmission(kv, userId, env, ports, options)).monthlyCap;
+  }
+
   const userSettings = await getUserBudgetSettings(kv, userId);
   const userCapUsd = userSettings?.monthlyCostCapUsd ?? null;
+  const ceilingUsd = await resolveMonthlyCostCeilingUsd(env, ports);
+  const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, ceilingUsd);
+  const source =
+    ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
+  if (capUsd === null) return { allowed: true, costUsd: 0, capUsd };
+  let costUsd: number;
+  try {
+    costUsd = await getLocalMonthlyAiCostUsd(kv, userId, env);
+  } catch {
+    log.error('ai_proxy.monthly_spend_unreadable');
+    throw errors.serviceUnavailable('AI spending limits are unavailable. Please try again later.');
+  }
+  return { allowed: costUsd < capUsd, costUsd, capUsd, ...source };
+}
 
-  if (hasLocalAiCostMetering(env)) {
-    const ceilingUsd = await resolveMonthlyCostCeilingUsd(env, ports);
-    const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, ceilingUsd);
-    const source =
-      ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
-    if (capUsd === null) return { allowed: true, costUsd: 0, capUsd };
-    let costUsd: number;
-    try {
-      costUsd = await getLocalMonthlyAiCostUsd(kv, userId, env);
-    } catch {
-      log.error('ai_proxy.monthly_spend_unreadable');
-      throw errors.serviceUnavailable(
-        'AI spending limits are unavailable. Please try again later.'
-      );
-    }
-    return { allowed: costUsd < capUsd, costUsd, capUsd, ...source };
+export interface GatewayCostAdmission {
+  /** The day's tokens, read in the same counter RPC; null when the counter was not read. */
+  usage: TokenBudget | null;
+  monthlyCap: MonthlyCostCapCheck;
+}
+
+/**
+ * The monthly cap on an AI Gateway install, plus the day's token usage from the same counter read
+ * so the gate makes one Durable Object round-trip, as before.
+ *
+ * Spend = the gateway total the hourly cron wrote, plus SAM's catalog-priced estimate for calls
+ * since it (minus the lag margin), or the month estimate when the cron has not written a total
+ * yet (`gatewayMonthlySpendUsd`, ai-cost-estimate.ts). The gateway is the authority: the estimate
+ * only covers what its total cannot have seen.
+ *
+ * Failure behaviour:
+ * - Unreadable gateway total (KV error or malformed value): treated as missing, so the month
+ *   estimate applies. Logged.
+ * - Unreadable lag setting: the default margin.
+ * - Counter read failure: throws, as the daily-budget read on this path always has. The blast
+ *   radius is the one user whose counter object is unreachable, for as long as it is.
+ * - No counter binding (KV-only local runtimes): the gateway total alone, allowed when absent.
+ * - A gateway without the account API cannot be priced: not enforceable, no reads.
+ */
+export async function checkGatewayCostAdmission(
+  kv: KVNamespace,
+  userId: string,
+  env: AiProxyEnv,
+  ports: MonthlyCostCeilingPort,
+  options?: MonthlyCostCapOptions
+): Promise<GatewayCostAdmission> {
+  const [userSettings, ceilingUsd] = await Promise.all([
+    getUserBudgetSettings(kv, userId),
+    options?.platformBilled === false ? null : resolveMonthlyCostCeilingUsd(env, ports),
+  ]);
+  const userCapUsd = userSettings?.monthlyCostCapUsd ?? null;
+  const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, ceilingUsd);
+  const source =
+    ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
+  if (capUsd === null || !isMonthlyCostCapAvailable(env)) {
+    return { usage: null, monthlyCap: { allowed: true, costUsd: 0, capUsd } };
   }
 
-  const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, null);
-  // No cap set — always allowed
-  if (capUsd === null) return { allowed: true, costUsd: 0, capUsd: userCapUsd };
+  const [gateway, lagSeconds] = await Promise.all([
+    getCachedGatewayMonthlyCost(kv, userId).catch((err: unknown) => {
+      log.error('ai_proxy.gateway_monthly_cost_unreadable', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }),
+    readCostEstimateLagSeconds(ports),
+  ]);
 
-  if (!isMonthlyCostCapAvailable(env)) {
-    return { allowed: true, costUsd: 0, capUsd };
+  const counter = getBudgetCounter(env, userId);
+  if (!counter) {
+    const costUsd = gateway?.costUsd ?? 0;
+    return {
+      usage: null,
+      monthlyCap: { allowed: gateway === null || costUsd < capUsd, costUsd, capUsd, ...source },
+    };
   }
 
-  const costUsd = await getCachedMonthlyCost(kv, userId);
+  const now = new Date();
+  const windowStartMs = estimateWindowStartMs(gateway, lagSeconds, now);
+  const snapshot = await counter.getGatewayAdmissionSnapshot(
+    buildBudgetDateKey(now),
+    utcMonthKey(now),
+    windowStartMs
+  );
+  const costUsd = gatewayMonthlySpendUsd(gateway, snapshot, windowStartMs, now);
+  return {
+    usage: snapshot.budget,
+    monthlyCap: { allowed: costUsd < capUsd, costUsd, capUsd, ...source },
+  };
+}
 
-  // No cache yet — fail-open until the hourly cron populates usage data.
-  // Window is at most 60 minutes after SAM mode activation or cap change.
-  // Acceptable risk: daily token budget (checked separately) still applies.
-  if (costUsd === null) {
-    return { allowed: true, costUsd: 0, capUsd };
+async function readCostEstimateLagSeconds(ports: MonthlyCostCeilingPort): Promise<number> {
+  if (!ports.costEstimateGatewayLagSeconds) return resolveCostEstimateLagSeconds(undefined);
+  try {
+    return resolveCostEstimateLagSeconds(await ports.costEstimateGatewayLagSeconds());
+  } catch {
+    log.warn('ai_proxy.cost_estimate_lag_unreadable');
+    return resolveCostEstimateLagSeconds(undefined);
   }
-
-  return { allowed: costUsd < capUsd, costUsd, capUsd };
 }

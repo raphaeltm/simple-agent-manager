@@ -1,7 +1,8 @@
 import { log } from '@simple-agent-manager/worker-core';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
-import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
+import { buildCostEstimateWrite } from './ai-cost-estimate';
+import { priceReportedUsage } from './ai-cost-pricing';
 import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import {
   type AiProviderUsageAttribution,
@@ -257,32 +258,38 @@ async function incrementExtractedUsage(
     (options.estimateMissingUsage ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
-  await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
-  const model =
-    options.costModelId && hasLocalAiCostMetering(options.env)
-      ? findPricedModel(options.costModelId)
-      : null;
+  // Priced on every install. Without a gateway the price is the spend record (display rows). With
+  // one it only backstops the gateway total (ai-cost-estimate.ts), kept out of the display rows,
+  // which GET /api/usage/ai adds to gateway totals.
+  const localMetering = hasLocalAiCostMetering(options.env);
+  const { model: pricedModel, costUsd } = priceReportedUsage(options.costModelId, {
+    anthropicFormat: options.format === 'anthropic',
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: usage.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+  });
+  const costEstimate = localMetering ? undefined : buildCostEstimateWrite(costUsd);
+  await incrementTokenUsage(
+    options.env.KV,
+    options.userId,
+    inputTokens,
+    outputTokens,
+    options.env,
+    ...(costEstimate ? [costEstimate] : [])
+  );
+  const model = localMetering ? pricedModel : null;
   const provider =
     options.provider ??
     (model
       ? { providerId: model.provider, providerName: model.provider, dialect: options.format }
       : undefined);
   if (provider) {
-    const cached = usage.cacheReadTokens ?? 0;
-    const writes = usage.cacheWriteTokens ?? 0;
-    const totalInput = options.format === 'anthropic' ? inputTokens + cached + writes : inputTokens;
-    const costUsd = model
-      ? priceModelUsageUsd(model, {
-          inputTokens: totalInput,
-          outputTokens,
-          cachedInputTokens: cached,
-          cacheWriteInputTokens: writes,
-        })
-      : 0;
+    const displayCostUsd = model ? costUsd : 0;
     const args = [options.env.KV, options.userId, provider, inputTokens, outputTokens] as const;
     // A priced call also records its catalog model (per-model breakdown without a gateway).
-    if (model) await incrementProviderUsage(...args, options.env, costUsd, model.id);
-    else if (options.costModelId) await incrementProviderUsage(...args, options.env, costUsd);
+    if (model) await incrementProviderUsage(...args, options.env, displayCostUsd, model.id);
+    else if (options.costModelId) await incrementProviderUsage(...args, options.env, 0);
     else await incrementProviderUsage(...args, options.env);
   }
   // Budget accounting is the billing control and runs first; run usage is telemetry and must

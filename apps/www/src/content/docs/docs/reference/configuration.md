@@ -2225,7 +2225,8 @@ default (`services/llm-endpoint-settings.ts`).
 | `llm.openAICompatible.aiProxyModel`        | unset   | Override for the proxy's Workers AI chat route.                                                                                                                                     |
 | `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                |
 | `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable. |
-| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user, in whole USD (`0` = none). Superadmin only. Applies only without an addressable gateway; ignored when one exists.                      |
+| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user's platform-funded calls, in whole USD (`0` = none). Superadmin only. Applies on every installation, with or without an AI Gateway. |
+| `aiProxy.costEstimateGatewayLagSeconds`    | `600`   | AI Gateway installations only. How far before the gateway month total's read time SAM's catalog estimate keeps counting calls (0-3600). |
 
 The endpoint capability reuses the existing per-isolate settings cache (up to 60 seconds); a warm,
 unconfigured Cloudflare call performs no additional D1 or credential reads. Configured URL/key
@@ -2253,31 +2254,50 @@ as a SAM proxy configuration; if the proxy does not serve them, agent-key return
 Daily token budgets apply to both routes. Without a gateway, SAM estimates platform model spend
 from its catalog into the existing per-user budget counter, and the monthly cap reads that total;
 the provider invoice remains authoritative. A missing local cost read refuses a capped call.
-The KV fallback reads at most 31 days in parallel. With a gateway, the hourly gateway-log cache
-remains the spend record. An operator endpoint's model has no catalog price and contributes zero
-dollars to this cap, including on installations with a gateway; set spending limits at the
-endpoint/provider as appropriate (`packages/ai-proxy/src/ai-monthly-cost-cap.ts`,
+The KV fallback reads at most 31 days in parallel. An operator endpoint's model has no catalog
+price and contributes zero dollars to this cap, including on installations with a gateway; set
+spending limits at the endpoint/provider as appropriate
+(`packages/ai-proxy/src/ai-monthly-cost-cap.ts`,
 `packages/ai-proxy/src/ai-gateway-availability.ts:isMonthlyCostCapAvailable`).
 
-Without a gateway, the cap each call is checked against is the lower of the user's own cap and
-`aiProxy.perUserMonthlyCostCeilingUsd` (`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap
-predicate shared by the gate, `GET /api/usage/ai/budget` and budget validation). A user who clears
-their cap is still held to the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The
-ceiling is per user, not a total across users. The operator chooses its amount in Admin; validation
-requires nonnegative whole USD within numeric precision, with no separate business maximum.
-It is read from the per-isolate admin settings
-cache (a change applies within 60 seconds), only on the no-gateway path, so a gateway
-installation's `/ai/v1` reads are unchanged. If the settings snapshot cannot be read after its cache expires,
-locally metered platform-funded inference is refused with a retryable `503 SERVICE_UNAVAILABLE`,
-logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same protection applies on a cold
-isolate; no extra last-known ceiling is reused during an outage (`services/ai-proxy-ports.ts`).
-Gateway calls and locally own-funded calls do not read this ceiling. A failed monthly-spend read
-also refuses inference with a retryable 503, without reporting that the cap has been reached.
+With a gateway (hosted SAM and other Cloudflare installations), the gateway's logs are the spend
+record. The hourly cron totals them per user into KV as `{costUsd, asOfMs}`
+(`ai-monthly-cost-cron.ts:runMonthlyCostAggregation`). Because that total trails real spend by up
+to an hour and does not exist before the cron first runs, SAM also prices every platform-funded
+response with the same catalog code and keeps the estimate in the user's budget counter, in
+5-minute buckets (`ai-cost-estimate.ts`, `ai-token-budget-counter.ts`). The spend compared with the
+cap is the gateway total plus the estimate for calls made since `asOfMs` minus
+`aiProxy.costEstimateGatewayLagSeconds`; when the cron has written no total yet it is the estimate
+for the month (`ai-cost-estimate.ts:gatewayMonthlySpendUsd`). The two windows do not overlap, so a
+call is never counted by both except inside the lag margin, and each cron run replaces the
+estimate with the gateway's own figure, so a catalog price that differs from what the gateway
+charged only affects the last hour or so. The estimate is not shown as spend: on gateway
+installations it is kept out of the provider rows that `GET /api/usage/ai` adds to gateway totals.
+The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a
+call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call,
+as the daily-budget read always has. An unreadable gateway total falls back to the month estimate.
+Models without a catalog price (an operator's own `SAM_MODEL`, `run_ai_model`'s Workers AI models,
+which have their own per-project budget) are counted only by the hourly gateway total.
+
+On every installation, the cap each platform-funded call is checked against is the lower of the
+user's own cap and `aiProxy.perUserMonthlyCostCeilingUsd`
+(`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap predicate shared by the gate,
+`GET /api/usage/ai/budget` and budget validation). A user who clears their cap is still held to
+the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The ceiling is per user, not a
+total across users. The operator chooses its amount in Admin; validation requires nonnegative whole
+USD within numeric precision, with no separate business maximum. It is read from the per-isolate
+admin settings cache (a change applies within 60 seconds). If the settings snapshot cannot be read
+after its cache expires, platform-funded inference is refused with a retryable
+`503 SERVICE_UNAVAILABLE`, logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same
+protection applies on a cold isolate; no extra last-known ceiling is reused during an outage
+(`services/ai-proxy-ports.ts`). Calls on a user's or project's own credential are not held to the
+ceiling. A failed monthly-spend read without a gateway also refuses inference with a retryable 503,
+without reporting that the cap has been reached.
 A call refused by the monthly cap or the daily token budget is a 429 whose message names that
 limit. The VM agent reports it as `sam_ai_usage_limit_reached`, not `provider_overloaded`, so the
 chat shows "AI usage limit reached" without a retry suggestion
 (`packages/vm-agent/internal/acp/sam_usage_limit.go`, `packages/shared/src/failure-classification.ts`).
-Once a ceiling is set, every gated call on such an installation reads the month's
+Without a gateway, once a ceiling is set, every gated call reads the month's
 priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
 calls served by a platform-owned credential are priced too; a user's or project's own credential
 is their own spend. Spend is priced after each response, so calls

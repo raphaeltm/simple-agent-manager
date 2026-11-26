@@ -15,8 +15,14 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
+import type { CostEstimateWrite } from './ai-cost-estimate';
 import { hasLocalAiCostMetering } from './ai-gateway-availability';
-import { checkMonthlyCostCap, type MonthlyCostCeilingPort } from './ai-monthly-cost-cap';
+import {
+  checkGatewayCostAdmission,
+  checkMonthlyCostCap,
+  type MonthlyCostCeilingPort,
+} from './ai-monthly-cost-cap';
+import { buildBudgetDateKey, getBudgetCounter } from './ai-token-budget-counter-client';
 import type { AiProxyEnv } from './env';
 
 export {
@@ -32,8 +38,10 @@ export {
 } from './ai-budget-settings';
 export {
   buildMonthlyCostCacheKey,
+  checkGatewayCostAdmission,
   checkMonthlyCostCap,
   effectiveMonthlyCostCapUsd,
+  getCachedGatewayMonthlyCost,
   getCachedMonthlyCost,
   type MonthlyCostCeilingPort,
   resolveMonthlyCostCeilingUsd,
@@ -57,34 +65,9 @@ export interface AiProviderUsageEntry extends AiProviderUsageAttribution {
   estimatedCostUsd: number;
 }
 
-interface AiTokenBudgetCounterStub extends DurableObjectStub {
-  get(dateKey: string): Promise<TokenBudget>;
-  consumeTotal(
-    dateKey: string,
-    tokenLimit: number,
-    tokens: number
-  ): Promise<{ allowed: boolean; usedTokens: number }>;
-  releaseTotal(dateKey: string, tokens: number): Promise<number>;
-  increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
-  incrementProviderUsage(
-    dateKey: string,
-    attribution: AiProviderUsageAttribution,
-    inputTokens: number,
-    outputTokens: number,
-    estimatedCostUsd: number,
-    modelId?: string
-  ): Promise<void>;
-  getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]>;
-}
-
 export interface PlatformDailyTokenLimits {
   dailyInputTokenLimit: number;
   dailyOutputTokenLimit: number;
-}
-
-function buildBudgetDateKey(date?: Date): string {
-  const d = date ?? new Date();
-  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -93,13 +76,6 @@ function buildBudgetDateKey(date?: Date): string {
  */
 export function buildBudgetKey(userId: string, date?: Date): string {
   return `ai-budget:${userId}:${buildBudgetDateKey(date)}`;
-}
-
-function getBudgetCounter(env: AiProxyEnv | undefined, userId: string) {
-  if (!env?.AI_TOKEN_BUDGET_COUNTER) return null;
-  return env.AI_TOKEN_BUDGET_COUNTER.get(
-    env.AI_TOKEN_BUDGET_COUNTER.idFromName(userId)
-  ) as AiTokenBudgetCounterStub;
 }
 
 function parsePositiveIntegerEnv(
@@ -256,14 +232,16 @@ export function resolveEffectiveLimits(
 export async function checkTokenBudget(
   kv: KVNamespace,
   userId: string,
-  env: AiProxyEnv
+  env: AiProxyEnv,
+  /** The day's usage when the caller already read it from the counter (gateway admission). */
+  preloadedUsage?: TokenBudget | null
 ): Promise<{ allowed: boolean; usage: TokenBudget; inputLimit: number; outputLimit: number }> {
   // Load user budget settings (may be null)
   const userSettings = await getUserBudgetSettings(kv, userId);
   const { dailyInputTokenLimit: inputLimit, dailyOutputTokenLimit: outputLimit } =
     resolveEffectiveLimits(userSettings, env);
 
-  const usage = await getTokenUsage(kv, userId, env);
+  const usage = preloadedUsage ?? (await getTokenUsage(kv, userId, env));
   const allowed = usage.inputTokens <= inputLimit && usage.outputTokens <= outputLimit;
 
   return { allowed, usage, inputLimit, outputLimit };
@@ -277,11 +255,22 @@ export async function incrementTokenUsage(
   userId: string,
   inputTokens: number,
   outputTokens: number,
-  env?: AiProxyEnv
+  env?: AiProxyEnv,
+  /**
+   * Gateway installs: this response's catalog-priced cost for the monthly-cap backstop
+   * (ai-cost-estimate.ts), stored in the same counter transaction. Absent means none. Dropped on
+   * the KV fallback, which has no estimate store (the gateway total alone then applies).
+   */
+  costEstimate?: CostEstimateWrite
 ): Promise<TokenBudget> {
   const counter = getBudgetCounter(env, userId);
   if (counter) {
-    const updated = await counter.increment(buildBudgetDateKey(), inputTokens, outputTokens);
+    const updated = await counter.increment(
+      buildBudgetDateKey(),
+      inputTokens,
+      outputTokens,
+      ...(costEstimate ? [costEstimate] : [])
+    );
 
     log.info('ai_proxy.token_usage_updated', {
       userId,
@@ -456,7 +445,10 @@ export type AiUsageGateResult =
       monthlyCap: Awaited<ReturnType<typeof checkMonthlyCostCap>>;
     };
 
-/** Check all pre-request AI usage limits shared by proxy routes. */
+/**
+ * Check all pre-request AI usage limits shared by proxy routes. On an AI Gateway install the
+ * monthly-cap state and the day's tokens come from one counter read (`checkGatewayCostAdmission`).
+ */
 export async function checkAiUsageGate(
   kv: KVNamespace,
   userId: string,
@@ -464,15 +456,21 @@ export async function checkAiUsageGate(
   ports: MonthlyCostCeilingPort,
   options?: { platformBilled?: boolean }
 ): Promise<AiUsageGateResult> {
-  const budget = await checkTokenBudget(kv, userId, env);
+  const localMetering = hasLocalAiCostMetering(env);
+  const gateway = localMetering
+    ? null
+    : await checkGatewayCostAdmission(kv, userId, env, ports, options);
+  const budget = await checkTokenBudget(kv, userId, env, gateway?.usage);
   if (!budget.allowed) {
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
   // Local dollar totals contain only platform-funded spend. Daily budgets still cover all calls.
   // Omission means platform billing; only the resolved passthrough credential opts out.
-  if (options?.platformBilled === false && hasLocalAiCostMetering(env)) return { allowed: true };
-  const monthlyCap = await checkMonthlyCostCap(kv, userId, env, ports);
+  if (options?.platformBilled === false && localMetering) return { allowed: true };
+  const monthlyCap = gateway
+    ? gateway.monthlyCap
+    : await checkMonthlyCostCap(kv, userId, env, ports, options);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
   }

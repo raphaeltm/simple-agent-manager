@@ -149,21 +149,28 @@ describe("the worker's usage gate reads the installation ceiling (F2)", () => {
   });
 });
 
-describe('gateway install: the worker gate never reads the ceiling (rule 60)', () => {
-  it('makes no admin-settings read and the same KV reads as before', async () => {
+describe('gateway install: the worker gate reads the ceiling and still makes one counter RPC (rule 60)', () => {
+  it('reads the ceiling, no gateway total without a cap, and only the daily counter read', async () => {
     const gatewayEnv = {
       ...env,
       AI_GATEWAY_ID: 'gw',
       CF_ACCOUNT_ID: 'acct',
       CF_API_TOKEN: 'tok',
     } as unknown as Env;
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: 0 });
     const getProviderUsage = vi.spyOn(counter, 'getProviderUsage');
+    const get = vi.spyOn(counter, 'get');
+    const snapshot = vi.spyOn(counter, 'getGatewayAdmissionSnapshot');
     await expect(checkAiUsageGate(gatewayEnv.KV, 'user', gatewayEnv)).resolves.toEqual({
       allowed: true,
     });
-    expect(mocks.resolveAdminSettingDetails).not.toHaveBeenCalled();
+    expect(mocks.resolveAdminSettingDetails).toHaveBeenCalledWith(
+      gatewayEnv,
+      'aiProxy.perUserMonthlyCostCeilingUsd'
+    );
     expect(getProviderUsage).not.toHaveBeenCalled();
-    // settings (token budget), settings (monthly cap); daily usage goes to the DO counter.
+    expect(get.mock.calls.length + snapshot.mock.calls.length).toBe(1);
+    // settings (monthly cap), settings (token budget); no cap so no gateway total read.
     expect(
       vi.mocked(gatewayEnv.KV.get).mock.calls.map(([key]) => String(key).split(':')[0])
     ).toEqual(['ai-budget-settings', 'ai-budget-settings']);

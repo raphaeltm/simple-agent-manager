@@ -1,6 +1,7 @@
 import { DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS } from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseGatewayMonthlyCost } from '../../src/ai-cost-estimate';
 import type { AIGatewayLogEntry } from '../../src/ai-gateway-logs';
 import type { AiProxyEnv as Env } from '../../src/env';
 
@@ -164,8 +165,18 @@ describe('runMonthlyCostAggregation', () => {
     );
 
     expect(result).toEqual({ enabled: true, usersUpdated: 2, totalEntries: 4, errors: 0 });
-    expect(kv._store.get('ai-monthly-cost:user-a:2026-06')).toBe('0.350000');
-    expect(kv._store.get('ai-monthly-cost:user-b:2026-06')).toBe('0.200000');
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-a:2026-06') ?? null)
+    ).toEqual({
+      costUsd: 0.35,
+      asOfMs: expect.any(Number),
+    });
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
+    ).toEqual({
+      costUsd: 0.2,
+      asOfMs: expect.any(Number),
+    });
     expect(kv._ttlByKey.get('ai-monthly-cost:user-a:2026-06')).toBe(3600);
     expect(kv._ttlByKey.get('ai-monthly-cost:user-b:2026-06')).toBe(3600);
     expect(mockIterateGatewayLogs).toHaveBeenCalledWith(
@@ -266,6 +277,11 @@ describe('runMonthlyCostAggregation', () => {
 
     expect(result).toEqual({ enabled: true, usersUpdated: 1, totalEntries: 2, errors: 1 });
     expect(kv._store.has(failingKey)).toBe(false);
-    expect(kv._store.get('ai-monthly-cost:user-b:2026-06')).toBe('0.200000');
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
+    ).toEqual({
+      costUsd: 0.2,
+      asOfMs: expect.any(Number),
+    });
   });
 });

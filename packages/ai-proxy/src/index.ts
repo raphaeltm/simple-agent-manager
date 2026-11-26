@@ -10,6 +10,11 @@ export {
   resolveUpstreamAuth,
   type UpstreamAuth,
 } from './ai-billing';
+export {
+  buildCostEstimateWrite,
+  type CostEstimateWrite,
+  parseGatewayMonthlyCost,
+} from './ai-cost-estimate';
 export { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 export {
   aiGatewayOnlyHeaders,

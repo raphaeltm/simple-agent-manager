@@ -1,4 +1,5 @@
 import type { MastraModelConfig } from '@mastra/core/llm';
+import { buildCostEstimateWrite } from '@simple-agent-manager/ai-proxy';
 import {
   filterModelsForAgentLoop,
   type PlatformAIModel,
@@ -190,7 +191,25 @@ export async function recordOperatorStepUsage(
   const anthropic = config.model.startsWith('claude-');
   const providerId = anthropic ? 'anthropic' : 'workers-ai';
   const providerName = anthropic ? 'Anthropic' : 'Cloudflare Workers AI';
-  await incrementTokenUsage(env.KV, userId, input, output, env);
+  const costUsd = customEndpoint
+    ? 0
+    : ((input - cached) * catalogModel.costPer1kInputTokens +
+        cached * cachedRate +
+        output * catalogModel.costPer1kOutputTokens) /
+      1000;
+  const localMetering = hasLocalAiCostMetering(env);
+  // With AI Gateway the gateway's logs are the spend record: the price only backstops the
+  // gateway's hourly total (ai-cost-estimate.ts) and stays out of the display rows, which
+  // GET /api/usage/ai adds to gateway totals.
+  const costEstimate = localMetering ? undefined : buildCostEstimateWrite(costUsd);
+  await incrementTokenUsage(
+    env.KV,
+    userId,
+    input,
+    output,
+    env,
+    ...(costEstimate ? [costEstimate] : [])
+  );
   await incrementProviderUsage(
     env.KV,
     userId,
@@ -202,13 +221,8 @@ export async function recordOperatorStepUsage(
     input,
     output,
     env,
-    customEndpoint
-      ? 0
-      : ((input - cached) * catalogModel.costPer1kInputTokens +
-          cached * cachedRate +
-          output * catalogModel.costPer1kOutputTokens) /
-          1000,
+    localMetering ? costUsd : 0,
     // Per-model breakdown only where SAM's own record is the spend record (ai-model-usage.ts).
-    !customEndpoint && hasLocalAiCostMetering(env) ? catalogModel.id : undefined
+    !customEndpoint && localMetering ? catalogModel.id : undefined
   );
 }

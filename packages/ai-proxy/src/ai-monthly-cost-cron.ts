@@ -10,6 +10,10 @@ import {
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
+import {
+  MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
+  serializeGatewayMonthlyCost,
+} from './ai-cost-estimate';
 import { resolveAiGatewayId } from './ai-gateway-availability';
 import {
   type GatewayLogsPorts,
@@ -21,7 +25,8 @@ import type { AiProxyEnv } from './env';
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;
 const MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP = 500;
 const MIN_MONTHLY_COST_CACHE_TTL_SECONDS = 60;
-export const MAX_MONTHLY_COST_CACHE_TTL_SECONDS = 86_400;
+
+export { MAX_MONTHLY_COST_CACHE_TTL_SECONDS };
 
 export interface MonthlyCostCronResult {
   enabled: boolean;
@@ -47,7 +52,8 @@ export function resolveMonthlyCostCacheTtlSeconds(raw: string | undefined): numb
 /**
  * Aggregate current-month AI Gateway costs per user and write to KV.
  *
- * KV key: `ai-monthly-cost:{userId}:{YYYY-MM}` → cost as string
+ * KV key: `ai-monthly-cost:{userId}:{YYYY-MM}` → `{costUsd, asOfMs}` JSON (`asOfMs` is when the
+ * log read started; `parseGatewayMonthlyCost` also reads the older plain-number form).
  * TTL: 2 hours (cron runs hourly, so stale data expires if cron stops).
  */
 export async function runMonthlyCostAggregation(
@@ -60,6 +66,9 @@ export async function runMonthlyCostAggregation(
   }
 
   const now = new Date();
+  // The gateway total covers calls up to roughly this instant; the cap adds the local estimate
+  // only for calls after it (minus the lag margin), see ai-cost-estimate.ts.
+  const asOfMs = now.getTime();
   const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   const { startDate } = getGatewayPeriodBounds('current-month');
   const ttl = resolveMonthlyCostCacheTtlSeconds(env.AI_MONTHLY_COST_CACHE_TTL_SECONDS);
@@ -102,7 +111,7 @@ export async function runMonthlyCostAggregation(
   for (const [userId, cost] of costByUser.entries()) {
     const key = `${AI_MONTHLY_COST_CACHE_KV_PREFIX}:${userId}:${monthKey}`;
     try {
-      await env.KV.put(key, cost.toFixed(6), { expirationTtl: ttl });
+      await env.KV.put(key, serializeGatewayMonthlyCost(cost, asOfMs), { expirationTtl: ttl });
       usersUpdated++;
     } catch (err) {
       errors++;

@@ -323,7 +323,7 @@ describe('DELETE /api/usage/ai/budget', () => {
   });
 });
 
-describe('installation monthly ceiling (no AI Gateway)', () => {
+describe('installation monthly ceiling', () => {
   // No addressable gateway and no counter binding: SAM prices spend itself (KV fallback).
   const noGateway = () => makeEnv({ AI_GATEWAY_ID: '', CF_ACCOUNT_ID: '' } as Partial<Env>);
 
@@ -375,14 +375,24 @@ describe('installation monthly ceiling (no AI Gateway)', () => {
     expect(resp.status).toBe(200);
   });
 
-  it('a gateway installation never reads the ceiling', async () => {
+  it('a gateway installation (hosted) reports and enforces the same ceiling', async () => {
     mockIterateGatewayLogs.mockResolvedValue(undefined);
     const data = await (await testApp.request('/api/usage/ai/budget', {}, makeEnv())).json();
-    expect(data.monthlyCostCap).toEqual({
-      available: true,
-      ceilingUsd: null,
-      effectiveCapUsd: null,
-    });
-    expect(mockResolveAdminSettingDetails).not.toHaveBeenCalled();
+    expect(data.monthlyCostCap).toEqual({ available: true, ceilingUsd: 25, effectiveCapUsd: 25 });
+    expect(mockResolveAdminSettingDetails).toHaveBeenCalledWith(
+      expect.anything(),
+      'aiProxy.perUserMonthlyCostCeilingUsd'
+    );
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyCostCapUsd: 60 }),
+      },
+      makeEnv()
+    );
+    expect(resp.status).toBe(400);
+    expect(kvStore.has('ai-budget-settings:user-budget-1')).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 /**
  * List-price estimate of one model call, from SAM's own price table (`PLATFORM_AI_MODELS`).
  *
- * Used where SAM is the only spend record: the SAM operator model, and the AI proxy on an
- * installation without Cloudflare AI Gateway (`hasLocalAiCostMetering`). It misses provider
+ * The spend record where SAM is the only one: the SAM operator model, and the AI proxy on an
+ * installation without Cloudflare AI Gateway (`hasLocalAiCostMetering`). With a gateway it only
+ * backstops the gateway total (ai-cost-estimate.ts). It misses provider
  * discounts and batch rates and lags provider price changes until the catalog is updated; the
  * provider invoice stays authoritative. Good enough for a per-user cap.
  */
@@ -46,4 +47,33 @@ export function priceModelUsageUsd(model: PlatformAIModel, usage: PricedTokenUsa
       nonNegative(usage.outputTokens) * model.costPer1kOutputTokens) /
     1000
   );
+}
+
+/**
+ * Price one response as the upstream reported it: the catalog model for `costModelId` (null when
+ * unset or not in the catalog, which prices $0) and its list-price cost. Anthropic reports cache
+ * reads and writes outside `inputTokens`; OpenAI includes them, so only Anthropic adds them back.
+ */
+export function priceReportedUsage(
+  costModelId: string | undefined,
+  usage: {
+    anthropicFormat: boolean;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+  }
+): { model: PlatformAIModel | null; costUsd: number } {
+  const model = costModelId ? findPricedModel(costModelId) : null;
+  if (!model) return { model: null, costUsd: 0 };
+  const { cacheReadTokens: cached, cacheWriteTokens: writes } = usage;
+  return {
+    model,
+    costUsd: priceModelUsageUsd(model, {
+      inputTokens: usage.anthropicFormat ? usage.inputTokens + cached + writes : usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: cached,
+      cacheWriteInputTokens: writes,
+    }),
+  };
 }

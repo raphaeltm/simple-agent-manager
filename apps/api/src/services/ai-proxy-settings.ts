@@ -1,12 +1,21 @@
 /**
- * Admin setting for the SAM AI proxy without Cloudflare AI Gateway (`ai-proxy-availability.ts`).
+ * Admin settings for the SAM AI proxy: the proxy without Cloudflare AI Gateway
+ * (`ai-proxy-availability.ts`) and the monthly spending limits on every install.
  * Kept apart from the resolver so the settings registry imports no resolution code (no cycle).
  */
+import {
+  DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
+  MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
+} from '@simple-agent-manager/shared';
+
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 
 export const AI_PROXY_DIRECT_UPSTREAM_SETTING = 'aiProxy.directUpstreamEnabled' as const;
 export const AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING =
   'aiProxy.perUserMonthlyCostCeilingUsd' as const;
+/** Gateway installs: overlap the catalog estimate keeps before the gateway total's read time. */
+export const AI_PROXY_COST_ESTIMATE_GATEWAY_LAG_SETTING =
+  'aiProxy.costEstimateGatewayLagSeconds' as const;
 /** Test-only fake upstream (`ai-test-upstream.ts`): users whose platform-funded calls it answers. */
 export const AI_TEST_UPSTREAM_USER_IDS_SETTING = 'aiProxy.testUpstreamUserIds' as const;
 /** Test-only fake upstream: list-price cost, in US cents, each fake call reports. */
@@ -23,6 +32,7 @@ const MAX_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS = 10_000;
 export type AiProxySettingName =
   | typeof AI_PROXY_DIRECT_UPSTREAM_SETTING
   | typeof AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING
+  | typeof AI_PROXY_COST_ESTIMATE_GATEWAY_LAG_SETTING
   | typeof AI_TEST_UPSTREAM_USER_IDS_SETTING
   | typeof AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING;
 
@@ -45,7 +55,7 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
     defaultValue: 0,
     category: 'AI models',
     description:
-      'Monthly AI spend ceiling for each user (not a total across users), in whole USD (0 = none). Applies where SAM prices AI calls itself, that is an installation without Cloudflare AI Gateway: no user can spend more than this in a UTC month, whatever monthly cap they set, and clearing their own cap does not remove it. Users cannot set a cap above it. Calls to a model with no catalog price count $0, so daily token limits remain the bound for those. Ignored where an AI Gateway exists (caps there are priced from gateway logs).',
+      "Monthly AI spend ceiling for each user (not a total across users), in whole USD (0 = none), for calls paid with the platform key. No user can spend more than this in a UTC month, whatever monthly cap they set, and clearing their own cap does not remove it. Users cannot set a cap above it. Without Cloudflare AI Gateway it is compared with SAM's own catalog-priced total. With a gateway it is compared with the gateway's month total (refreshed hourly) plus SAM's catalog-priced estimate of calls since that refresh, so the limit applies within minutes, not an hour later. Calls to a model with no catalog price count $0 in SAM's figures, so between refreshes daily token limits remain the bound for those. Calls on a user's own key are not counted against it.",
     secret: false,
     risky: false,
     // Representation bound only: the operator chooses the business limit in this setting.
@@ -55,6 +65,22 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
       Number.isSafeInteger(value) &&
       value >= 0 &&
       value <= Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: AI_PROXY_COST_ESTIMATE_GATEWAY_LAG_SETTING,
+    type: 'integer',
+    defaultValue: DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
+    category: 'AI models',
+    description:
+      "Installations with Cloudflare AI Gateway only. Monthly spending limits add SAM's catalog-priced estimate of recent calls to the gateway's hourly month total. Calls this many seconds before that total was read are counted by both, because gateway logs can appear a few minutes after a call. A larger value refuses slightly earlier near a limit; 0 trusts the gateway total exactly to its read time.",
+    secret: false,
+    risky: false,
+    range: { min: 0, max: MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS },
+    validate: (value) =>
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
   },
   {
     name: AI_TEST_UPSTREAM_USER_IDS_SETTING,
