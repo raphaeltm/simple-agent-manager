@@ -89,7 +89,7 @@ self-host box path (no gateway) must not change behaviour.
 - [x] Config: lag margin as admin setting `aiProxy.costEstimateGatewayLagSeconds` (runtime-tunables rule)
 - [x] Setting descriptions + `reference/configuration.md` (web UI reads ceilingUsd from the API; no copy change needed)
 - [x] Tests, each guard deleted once to show red (results below)
-- [ ] Staging verification on the final head: user-cap refusal within seconds, and a live refusal at the admin ceiling (coordinator: up to $1.50 real spend, restore every setting)
+- [x] Staging verification on the final head (staging2, #3015 + #3019, see below): user-cap refusal within seconds, and a live refusal at the admin ceiling (coordinator: up to $1.50 real spend, restore every setting)
 - [x] Unpriced platform passthrough refused on Cloudflare installs too (Raphaël approved, ask 01M8BX5PJ0DHA63T19N5RCM950): cherry-picked c8f3eefa8 as 68c82f260
 - [x] Codex P1 r4708394293 (rolling window under the cron page cap): fixed in fa0a3fe22 + 619b7fc2d (settled-part chain, 1-hour settle margin, de-dup by log id)
 - [x] CI Durable Object Workers shard 1/7: real failure (`sam-live-stream.test.ts` asserted operator cost in display rows on a gateway runtime); test now checks cached pricing without a gateway
@@ -137,3 +137,19 @@ The DO-failure path (snapshot RPC throws → gate throws) is asserted directly; 
 - Security LOW findings left as is: estimate/gateway overlap beyond the lag margin (fails safe),
   budget page ignores a truncated live read (display only, pre-existing), pre-existing zero-count
   cases (mid-stream failure, failed counter write, no counter binding, zero-token responses).
+
+## Staging evidence (2026-11-26, staging2)
+
+Ran on throwaway branch `sam/3015-staging-proof` = #3015 head 75309dd34 + #3019 branch at
+0bb39a080, because #3018 had left a protected Pulumi marker in both staging stacks that a
+main-based deploy tries to delete (coordinator's instruction). Worker version a5268c0a at 100%,
+annotated with commit a23a3e46e; deploy run 45883738470 failed only at the runner Health Check
+(known WAF item); /health 200 from the workspace.
+
+- Admin ceiling: staging2-agent-admin (month gateway total $1.74). With no ceiling, the control
+  turn completed (19:48:31). With the ceiling at $1, the next turn (19:49:30) was refused:
+  "Administrator monthly AI spending limit reached". No new spend. Ceiling reset, SAM disabled.
+- User cap: staging2-test-user (gateway total $0.001386), cap $0.01. Turns 1-7 completed and turn 8
+  was refused 28 s after the first (19:51:54): "Monthly cost cap exceeded". The KV total was still
+  $0.001386 afterwards, so the local estimate refused it. Cap cleared, SAM disabled.
+- Real spend: about $0.01.
