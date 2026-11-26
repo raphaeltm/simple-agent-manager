@@ -137,6 +137,11 @@ async function auditFullAdopt(page: Page) {
   await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
   await page.locator('#plan-details summary').click();
   await expect(page.locator('#plan-summary')).toContainText('Takes over');
+  // A takeover sets up no email, so the review must not promise sign-in codes or new records.
+  await expect(page.locator('#plan-summary')).toContainText(
+    'Stays as it is. If your SAM sends sign-in codes from agents.sam.example.com, it keeps doing so. If it does not, the takeover does not set that up.'
+  );
+  await expect(page.locator('#plan-summary')).not.toContainText('sending records are added');
   await expect(page.locator('#plan-summary')).toContainText('team-deploy-state');
   await expect(page.locator('#plan-summary')).toContainText(
     "Your installation service gets access to that whole bucket. The deployment's data"
@@ -161,6 +166,9 @@ async function auditFullReview(page: Page) {
   await expect(page.locator('#plan-details summary')).toHaveText('What will be created');
   await page.locator('#plan-details summary').click();
   await expect(page.locator('#plan-summary')).toContainText('sam-account.workers.dev (new)');
+  await expect(page.locator('#plan-summary')).toContainText(
+    'Sign-in codes come from agents.sam.example.com. Its sending records are added under that name only.'
+  );
   await expect(page.locator('#plan-summary')).not.toContainText('Initialize account address');
   await expect(page.locator('#review-blocked')).toBeHidden();
   await expect(page.locator('#review-form')).toBeVisible();

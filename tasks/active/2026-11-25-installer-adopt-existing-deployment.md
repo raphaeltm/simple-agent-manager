@@ -385,3 +385,9 @@ Fix: an adopted deploy (takeover and every later update) prepares email only whe
 Mutations: adoption prepares email like a new install (red: `sets up no email on a takeover of a deployment that has none`, `keeps the email an adopted deployment has, from what exists only`); flag dropped (second red); stale marker kept (first red); binding never seen (second red); script ignores `existingOnly` (red: both `with existingOnly` tests in `scripts/quality/deploy-agent-email.test.ts`).
 
 Other writes of the same phase were read and left as they are, and are now documented under "What the deploy itself applies": the assets bucket's upload CORS rule, the AI Gateway when the account lacks it, the tail Worker. Each is configuration the approved source needs and a fork's deploy applies the same.
+
+## Codex round 13 (on 477691c21): the review promised email on a takeover
+
+Finding: the installer's review listed an Email row for every plan ("Sign-in codes come from agents.<domain>. Its sending records are added…"), which a takeover no longer does. Valid.
+
+Fix: for an adoption plan the row reads "Stays as it is. If your SAM sends sign-in codes from agents.<domain>, it keeps doing so. If it does not, the takeover does not set that up." (`renderCreatedDetails`, `apps/installer/public/installer/plan.js`). The installer does not read the deployed Worker's bindings at review time, so it states both outcomes instead of guessing one. The browser audit asserts the takeover wording in `full-adopt` and the original wording in `full-review`. Mutation: old wording served for adoption plans, `full-adopt` red on the expected substring; a first attempt on a second port was invalid because the installer answers only on its configured address.
