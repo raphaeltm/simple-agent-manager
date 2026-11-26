@@ -20,9 +20,7 @@ import {
   DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
   MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
 } from '@simple-agent-manager/shared';
-import { log, maybeJsonRecord } from '@simple-agent-manager/worker-core';
-
-import type { AiProxyPorts } from './ports';
+import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
 /** Longest TTL the monthly cost cron may give its KV totals (`resolveMonthlyCostCacheTtlSeconds`). */
 export const MAX_MONTHLY_COST_CACHE_TTL_SECONDS = 86_400;
@@ -85,8 +83,8 @@ export interface GatewayMonthlyCost {
    */
   truncated: boolean;
   /**
-   * The part of `costUsd` on logs created before `beforeMs` (`asOf` minus the lag margin): logs
-   * the gateway has finished writing. The next cron run adds only logs from `beforeMs` on, so two
+   * The part of `costUsd` on logs created before `beforeMs` (`asOf` minus the cron's settle
+   * margin, one hour): logs the gateway has finished writing. The next cron run adds only logs from `beforeMs` on, so two
    * reads never count the same log (`runMonthlyCostAggregation`). Absent on legacy values and
    * where no exact base exists yet.
    */
@@ -243,17 +241,4 @@ export function resolveCostEstimateLagSeconds(value: unknown): number {
     value <= MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS
     ? value
     : DEFAULT_COST_ESTIMATE_GATEWAY_LAG_SECONDS;
-}
-
-/** The lag-margin admin setting through the ports; absent or unreadable means the default. */
-export async function readCostEstimateLagSeconds(
-  ports: Partial<Pick<AiProxyPorts, 'costEstimateGatewayLagSeconds'>>
-): Promise<number> {
-  if (!ports.costEstimateGatewayLagSeconds) return resolveCostEstimateLagSeconds(undefined);
-  try {
-    return resolveCostEstimateLagSeconds(await ports.costEstimateGatewayLagSeconds());
-  } catch {
-    log.warn('ai_proxy.cost_estimate_lag_unreadable');
-    return resolveCostEstimateLagSeconds(undefined);
-  }
 }

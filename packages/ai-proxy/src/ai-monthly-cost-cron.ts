@@ -12,9 +12,9 @@ import { log } from '@simple-agent-manager/worker-core';
 
 import {
   type GatewayMonthlyCost,
+  MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
   MAX_MONTHLY_COST_CACHE_TTL_SECONDS,
   parseGatewayMonthlyCost,
-  readCostEstimateLagSeconds,
   serializeGatewayMonthlyCost,
   utcMonthKey,
   utcMonthStartMs,
@@ -26,11 +26,17 @@ import {
   iterateGatewayLogs,
 } from './ai-gateway-logs';
 import type { AiProxyEnv } from './env';
-import type { AiProxyPorts } from './ports';
 
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;
 const MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP = 500;
 const MIN_MONTHLY_COST_CACHE_TTL_SECONDS = 60;
+/**
+ * How long a gateway log may take to appear after its `created_at`. A streamed call is logged when
+ * it finishes, so this must exceed the longest call, not just ingestion delay. The cron settles only
+ * logs older than this (`nextUserTotal`); a log that appears later than this after a truncated run
+ * is missed by the chain. Derived from the largest lag-margin setting (one hour).
+ */
+const GATEWAY_LOG_SETTLE_MS = MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS * 1000;
 
 export { MAX_MONTHLY_COST_CACHE_TTL_SECONDS };
 
@@ -55,10 +61,6 @@ export function resolveMonthlyCostCacheTtlSeconds(raw: string | undefined): numb
   return Math.min(Math.floor(parsed), MAX_MONTHLY_COST_CACHE_TTL_SECONDS);
 }
 
-/** The cron's ports: the log-read timeout, and the lag margin that decides which logs are settled. */
-export type MonthlyCostCronPorts = GatewayLogsPorts &
-  Partial<Pick<AiProxyPorts, 'costEstimateGatewayLagSeconds'>>;
-
 /** One user's logs from a read: each log's creation time (NaN when unparseable) and cost. */
 type UserLogs = Array<{ createdMs: number; costUsd: number }>;
 
@@ -73,13 +75,13 @@ type UserLogs = Array<{ createdMs: number; costUsd: number }>;
  * cap the read is a window of the newest logs, which moves forward between runs, so totals from
  * two windows overlap and cannot be combined with `max` (new spend that displaced old logs from
  * the window would vanish). Each total therefore records its settled part: spend on logs created
- * before `settledBeforeMs` (`asOf` minus the lag margin). A truncated read whose window reaches
+ * before `settledBeforeMs` (`asOf` minus `GATEWAY_LOG_SETTLE_MS`). A truncated read whose window reaches
  * back past the previous settled boundary adds only logs from that boundary on, which is exact.
  * See `nextUserTotal` for the cases where it is not.
  */
 export async function runMonthlyCostAggregation(
   env: AiProxyEnv,
-  ports: MonthlyCostCronPorts
+  ports: GatewayLogsPorts
 ): Promise<MonthlyCostCronResult> {
   const gatewayId = resolveAiGatewayId(env);
   if (!gatewayId) {
@@ -94,16 +96,14 @@ export async function runMonthlyCostAggregation(
   const { startDate } = getGatewayPeriodBounds('current-month');
   const ttl = resolveMonthlyCostCacheTtlSeconds(env.AI_MONTHLY_COST_CACHE_TTL_SECONDS);
   // Logs created before this are treated as written; later ones may still be arriving.
-  const settledBeforeMs = Math.max(
-    utcMonthStartMs(now),
-    asOfMs - (await readCostEstimateLagSeconds(ports)) * 1000
-  );
+  const settledBeforeMs = Math.max(utcMonthStartMs(now), asOfMs - GATEWAY_LOG_SETTLE_MS);
 
   const logsByUser = new Map<string, UserLogs>();
   let totalEntries = 0;
   let truncated = false;
   // Creation time of the oldest log the read reached (all users), for a truncated read.
   let oldestReadMs = Number.POSITIVE_INFINITY;
+  const seenIds = new Set<string>();
 
   try {
     ({ truncated } = await iterateGatewayLogs(
@@ -113,6 +113,10 @@ export async function runMonthlyCostAggregation(
       startDate,
       (entry) => {
         totalEntries++;
+        // Offset pagination can return an entry twice when logs arrive during the read; a settled
+        // duplicate would stay in the total for the rest of the month.
+        if (seenIds.has(entry.id)) return;
+        seenIds.add(entry.id);
         const createdMs = Date.parse(entry.created_at);
         if (createdMs < oldestReadMs) oldestReadMs = createdMs;
         const userId = entry.metadata?.userId;

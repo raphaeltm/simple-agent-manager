@@ -178,8 +178,8 @@ describe('runMonthlyCostAggregation', () => {
       costUsd: 0.35,
       asOfMs: expect.any(Number),
       truncated: false,
-      // A complete read settles every log older than the default 10-minute lag margin.
-      settled: { usd: 0.35, beforeMs: Date.parse('2026-06-15T12:24:56.000Z') },
+      // A complete read settles every log older than the one-hour settle margin.
+      settled: { usd: 0.35, beforeMs: Date.parse('2026-06-15T11:34:56.000Z') },
     });
     expect(
       parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
@@ -319,8 +319,14 @@ describe('runMonthlyCostAggregation', () => {
           return { truncated };
         }
       );
+    let nextId = 0;
     const spend = (user: string, createdMs: number, cost: number) =>
-      makeGatewayEntry({ cost, created_at: at(createdMs), metadata: { userId: user } });
+      makeGatewayEntry({
+        id: `log-${user}-${createdMs}-${nextId++}`,
+        cost,
+        created_at: at(createdMs),
+        metadata: { userId: user },
+      });
     const read = (kv: ReturnType<typeof createMockKV>, user: string) =>
       parseGatewayMonthlyCost(kv._store.get(key(user)) ?? null);
 
@@ -345,25 +351,29 @@ describe('runMonthlyCostAggregation', () => {
         costUsd: 110,
         asOfMs: NOW,
         truncated: false,
-        // The $10 is newer than this run's lag margin, so it is not settled yet.
-        settled: { usd: 100, beforeMs: NOW - 10 * MIN },
+        // The $10 is newer than the one-hour settle margin, so it is not settled yet.
+        settled: { usd: 100, beforeMs: NOW - 60 * MIN },
       });
     });
 
     it('accumulates exactly across consecutive truncated runs', async () => {
       const kv = createMockKV();
-      // Run 1, complete: $5 an hour before.
+      // Run 1, complete: $5, settled (older than an hour).
       vi.setSystemTime(NOW - 60 * MIN);
-      serve([spend('user-a', NOW - 120 * MIN, 5)], false);
+      serve([spend('user-a', NOW - 150 * MIN, 5)], false);
       await runMonthlyCostAggregation(makeEnv({ KV: kv }));
       // Run 2, truncated window that no longer contains the $5 log: $3 new.
       vi.setSystemTime(NOW);
-      serve([spend('user-a', NOW - 30 * MIN, 3), spend('user-b', NOW - 80 * MIN, 0)]);
+      serve([spend('user-a', NOW - 30 * MIN, 3), spend('user-b', NOW - 130 * MIN, 0)]);
       await runMonthlyCostAggregation(makeEnv({ KV: kv }));
       expect(read(kv, 'user-a')).toMatchObject({ costUsd: 8, truncated: false });
-      // Run 3, an hour later: the window moved again, $2 new; the $3 log is still in it.
+      // Run 3, an hour later: the window moved again, $2 new; the unsettled $3 log is still in it.
       vi.setSystemTime(NOW + 60 * MIN);
-      serve([spend('user-a', NOW + 20 * MIN, 2), spend('user-a', NOW - 30 * MIN, 3)]);
+      serve([
+        spend('user-a', NOW + 20 * MIN, 2),
+        spend('user-a', NOW - 30 * MIN, 3),
+        spend('user-b', NOW - 70 * MIN, 0),
+      ]);
       await runMonthlyCostAggregation(makeEnv({ KV: kv }));
       expect(read(kv, 'user-a')).toMatchObject({ costUsd: 10, truncated: false });
     });
@@ -405,7 +415,7 @@ describe('runMonthlyCostAggregation', () => {
         costUsd: 7,
         asOfMs: NOW,
         truncated: true,
-        settled: { usd: 6, beforeMs: NOW - 10 * MIN },
+        settled: { usd: 4, beforeMs: NOW - 60 * MIN },
       });
     });
 
@@ -454,7 +464,7 @@ describe('runMonthlyCostAggregation', () => {
         JSON.stringify({ costUsd: 4, asOfMs: boundary, settledUsd: 4, settledBeforeMs: boundary })
       );
       serve([spend('user-a', NOW - 7 * MIN, 1), spend('user-b', NOW - 30 * MIN, 1)]);
-      await runMonthlyCostAggregation(makeEnv({ KV: kv })); // default 10-minute margin
+      await runMonthlyCostAggregation(makeEnv({ KV: kv })); // one-hour settle margin
       expect(read(kv, 'user-a')).toMatchObject({
         costUsd: 4,
         settled: { usd: 4, beforeMs: boundary },
@@ -475,8 +485,13 @@ describe('runMonthlyCostAggregation', () => {
       const kv = createMockKV();
       serve(
         [
-          spend('user-a', NOW - 60 * MIN, 1),
-          makeGatewayEntry({ cost: 2, created_at: 'garbage', metadata: { userId: 'user-a' } }),
+          spend('user-a', NOW - 90 * MIN, 1),
+          makeGatewayEntry({
+            id: 'entry-garbage',
+            cost: 2,
+            created_at: 'garbage',
+            metadata: { userId: 'user-a' },
+          }),
         ],
         false
       );
@@ -484,17 +499,12 @@ describe('runMonthlyCostAggregation', () => {
       expect(read(kv, 'user-a')).toMatchObject({ costUsd: 3, settled: { usd: 1 } });
     });
 
-    it('settles by the admin lag margin', async () => {
+    it('counts an entry the paginated read returned twice once', async () => {
       const kv = createMockKV();
-      serve([spend('user-a', NOW - 20 * MIN, 1)], false);
-      await runMonthlyCostAggregationWithPorts(makeEnv({ KV: kv }), {
-        ...TEST_PORTS,
-        costEstimateGatewayLagSeconds: async () => 30 * 60,
-      });
-      expect(read(kv, 'user-a')).toMatchObject({
-        costUsd: 1,
-        settled: { usd: 0, beforeMs: NOW - 30 * MIN },
-      });
+      const entry = { ...spend('user-a', NOW - 90 * MIN, 1), id: 'log-1' };
+      serve([entry, { ...spend('user-a', NOW - 95 * MIN, 2), id: 'log-2' }, entry], false);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 3, settled: { usd: 3 } });
     });
   });
 });

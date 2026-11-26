@@ -2214,19 +2214,19 @@ A superadmin can set these keys under **Admin → Settings → AI models**. Rese
 `llm.openAICompatible.baseUrl` to restore normal Cloudflare routing. No endpoint is enabled by
 default (`services/llm-endpoint-settings.ts`).
 
-| Setting                                    | Default | Meaning                                                                                                                                                                                                                  |
-| ------------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `llm.openAICompatible.baseUrl`             | unset   | OpenAI-style base URL, such as `https://llm.example.com/v1`; omit `/chat/completions`. Overrides Workers AI chat, task titles, diagnosis and SAM agent calls.                                                            |
-| `llm.openAICompatible.apiKey`              | unset   | Optional Bearer key, encrypted in platform credentials and never returned by settings reads.                                                                                                                             |
-| `llm.openAICompatible.model`               | unset   | Endpoint model ID; falls back to the caller's requested model.                                                                                                                                                           |
-| `llm.openAICompatible.agentModel`          | unset   | Override for SAM and project agents.                                                                                                                                                                                     |
-| `llm.openAICompatible.taskTitleModel`      | unset   | Override for title generation.                                                                                                                                                                                           |
-| `llm.openAICompatible.diagnosisModel`      | unset   | Override for diagnosis.                                                                                                                                                                                                  |
-| `llm.openAICompatible.aiProxyModel`        | unset   | Override for the proxy's Workers AI chat route.                                                                                                                                                                          |
-| `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                                                     |
-| `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable.                                      |
-| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user's platform-funded calls, in whole USD (`0` = none). Superadmin only. Applies on every installation, with or without an AI Gateway.                                           |
-| `aiProxy.costEstimateGatewayLagSeconds`    | `600`   | AI Gateway installations only. How far before the gateway month total's read time SAM's catalog estimate keeps counting calls, and how recent a gateway log must be for the cron to treat it as still arriving (0-3600). |
+| Setting                                    | Default | Meaning                                                                                                                                                                             |
+| ------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm.openAICompatible.baseUrl`             | unset   | OpenAI-style base URL, such as `https://llm.example.com/v1`; omit `/chat/completions`. Overrides Workers AI chat, task titles, diagnosis and SAM agent calls.                       |
+| `llm.openAICompatible.apiKey`              | unset   | Optional Bearer key, encrypted in platform credentials and never returned by settings reads.                                                                                        |
+| `llm.openAICompatible.model`               | unset   | Endpoint model ID; falls back to the caller's requested model.                                                                                                                      |
+| `llm.openAICompatible.agentModel`          | unset   | Override for SAM and project agents.                                                                                                                                                |
+| `llm.openAICompatible.taskTitleModel`      | unset   | Override for title generation.                                                                                                                                                      |
+| `llm.openAICompatible.diagnosisModel`      | unset   | Override for diagnosis.                                                                                                                                                             |
+| `llm.openAICompatible.aiProxyModel`        | unset   | Override for the proxy's Workers AI chat route.                                                                                                                                     |
+| `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                |
+| `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable. |
+| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user's platform-funded calls, in whole USD (`0` = none). Superadmin only. Applies on every installation, with or without an AI Gateway.      |
+| `aiProxy.costEstimateGatewayLagSeconds`    | `600`   | AI Gateway installations only. How far before the gateway month total's read time SAM's catalog estimate keeps counting calls (0-3600).                                             |
 
 The endpoint capability reuses the existing per-isolate settings cache (up to 60 seconds); a warm,
 unconfigured Cloudflare call performs no additional D1 or credential reads. Configured URL/key
@@ -2269,11 +2269,13 @@ response with the same catalog code and keeps the estimate in the user's budget 
 cap is the gateway total plus the estimate for calls made since `asOfMs` minus
 `aiProxy.costEstimateGatewayLagSeconds`; when the cron has written no total yet it is the estimate
 for the month (`ai-cost-estimate.ts:gatewayMonthlySpendUsd`). Each total also records its settled
-part: spend on logs created before `asOfMs` minus the lag margin (`settledUsd`, `settledBeforeMs`).
+part: spend on logs created more than an hour before `asOfMs` (`settledUsd`, `settledBeforeMs`; a
+streamed call is logged when it finishes, so newer logs may still be arriving).
 The cron's log read is newest first and capped at `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES` pages, so
 past the cap it sees a window of the newest logs that moves on between runs. A run whose window
 reaches back past the previous settled boundary adds only the logs from that boundary on to the
-previous settled spend, which is exact (`nextUserTotal`). When the window does not reach back that
+previous settled spend, which is exact (`nextUserTotal`); entries are de-duplicated by log id. A
+log that appears more than an hour after its call during such a month is missed. When the window does not reach back that
 far, or no settled part exists yet (a total in an older format, or a month that was already past
 the cap when this version was deployed), the total is a lower bound: it records `truncated: true`,
 the month estimate is then a floor, and `cron.monthly_cost.truncated_read` counts such totals. Each
@@ -2288,8 +2290,8 @@ logs, so for a platform-owned credential SAM's price is their spend record on ev
 they are priced in those provider rows and kept as a month total that the cap always adds to the
 gateway figure (`ai_direct_spend_month`). `GET /api/usage/ai/budget` adds the same month total to its
 live gateway-log figure. Raise `AI_MONTHLY_COST_AGGREGATION_MAX_PAGES` (hard cap 500) if
-`cron.monthly_cost.truncated_read` reports gap totals regularly: the read then covers less than an
-hour of logs.
+`cron.monthly_cost.truncated_read` reports gap totals regularly: the read then covers less than
+two hours of logs.
 The estimate read shares the existing per-call counter read (`checkGatewayCostAdmission`), so a
 call makes one Durable Object round-trip, as before; a failed counter read refuses that user's call
 with a retryable 503 (`ai_proxy.monthly_spend_unreadable`), as the daily-budget read always refused

@@ -72,7 +72,7 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
     defaultValue: DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
     category: 'AI models',
     description:
-      "Installations with Cloudflare AI Gateway only. Monthly spending limits add SAM's catalog-priced estimate of recent calls to the gateway's hourly month total. Calls this many seconds before that total was read are counted by both, because gateway logs can appear a few minutes after a call. The monthly total job also treats logs this recent as still arriving, so it re-reads them on its next run. A larger value refuses slightly earlier near a limit; 0 trusts the gateway total exactly to its read time.",
+      "Installations with Cloudflare AI Gateway only. Monthly spending limits add SAM's catalog-priced estimate of recent calls to the gateway's hourly month total. Calls this many seconds before that total was read are counted by both, because gateway logs can appear a few minutes after a call. A larger value refuses slightly earlier near a limit; 0 trusts the gateway total exactly to its read time.",
     secret: false,
     risky: false,
     range: { min: 0, max: MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS },
