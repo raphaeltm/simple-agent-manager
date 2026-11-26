@@ -14,9 +14,19 @@ import { collectSourceFiles, SRC_ROOT } from '../../helpers/source-tree';
 
 /** Calls that resolve a platform credential or send a request upstream on one (not definitions). */
 const PLATFORM_SPEND_CALL =
-  /(?<!function )\b(?:resolveUpstreamAuth|resolveOpenAIProxyCredential|forwardToAnthropic|forwardToOpenAI|forwardToOpenAIResponses|forwardToWorkersAI)\(/;
-const ALLOWLIST_GATE_CALL = /\b(?:validateAllowedModel|validateAnthropicAllowedModel)\(/;
-const TIER_GATE_CALL = /\b(?:enforceModelTier|enforceAnthropicModelTier)\(/;
+  /(?<!function )\b(?:resolveUpstreamAuth|resolveOpenAIProxyCredential|forwardToAnthropic|forwardToOpenAI|forwardToOpenAIResponses|forwardToWorkersAI|upstreamFetch)\(/;
+/**
+ * The native Anthropic routes run their gates in one shared admission step
+ * (`ai-proxy-anthropic-prelude.ts`). A call to it counts as both gates only because the last test
+ * below proves that step gates before it resolves a credential or selects the fake upstream.
+ */
+const ANTHROPIC_ADMISSION_CALL = /\badmitAnthropicProxyRequest\(/;
+const ALLOWLIST_GATE_CALL = new RegExp(
+  `\\b(?:validateAllowedModel|validateAnthropicAllowedModel)\\(|${ANTHROPIC_ADMISSION_CALL.source}`
+);
+const TIER_GATE_CALL = new RegExp(
+  `\\b(?:enforceModelTier|enforceAnthropicModelTier)\\(|${ANTHROPIC_ADMISSION_CALL.source}`
+);
 /** Each POST handler runs from its registration to the next one (or the end of the file). */
 const POST_HANDLER_START = /(?=\.post\(\s*['"`])/;
 
@@ -47,12 +57,15 @@ describe('every platform-credential AI proxy handler admits the model before spe
   it('finds the platform-spending routes and handlers, so a broken scan cannot pass as "all clear"', () => {
     expect(routeSources.length).toBeGreaterThan(100);
     expect(spendingRoutes.map(({ file }) => file).sort()).toEqual([
+      'routes/ai-proxy-anthropic-count-tokens.ts',
+      'routes/ai-proxy-anthropic-prelude.ts',
       'routes/ai-proxy-anthropic.ts',
+      'routes/ai-proxy-upstream.ts',
       'routes/ai-proxy.ts',
     ]);
     expect(handlers.map(({ name }) => name).sort()).toEqual([
+      'routes/ai-proxy-anthropic-count-tokens.ts /messages/count_tokens',
       'routes/ai-proxy-anthropic.ts /messages',
-      'routes/ai-proxy-anthropic.ts /messages/count_tokens',
       'routes/ai-proxy.ts /chat/completions',
       'routes/ai-proxy.ts /responses',
     ]);
@@ -72,6 +85,27 @@ describe('every platform-credential AI proxy handler admits the model before spe
       expect(tierAt).toBeLessThan(spendAt);
     }
   );
+
+  it('the shared Anthropic admission step gates before it resolves a credential or selects the fake', () => {
+    const prelude = routeSources.find(
+      ({ file }) => file === 'routes/ai-proxy-anthropic-prelude.ts'
+    );
+    expect(prelude).toBeDefined();
+    const body = prelude!.source.slice(
+      prelude!.source.search(/export async function admitAnthropicProxyRequest\(/)
+    );
+    const allowlistAt = body.search(/\bvalidateAnthropicAllowedModel\(/);
+    const tierAt = body.search(/\benforceAnthropicModelTier\(/);
+    const credentialAt = body.search(/\bresolveUpstreamAuth\(/);
+    const fakeAt = body.search(/\bresolveAiTestUpstream\(/);
+    for (const spendAt of [credentialAt, fakeAt]) {
+      expect(spendAt).toBeGreaterThan(-1);
+      expect(allowlistAt).toBeGreaterThan(-1);
+      expect(allowlistAt).toBeLessThan(spendAt);
+      expect(tierAt).toBeGreaterThan(-1);
+      expect(tierAt).toBeLessThan(spendAt);
+    }
+  });
 
   it('BYO-key passthrough stays outside the gates because it never resolves a platform credential', () => {
     const passthrough = routeSources.find(({ file }) => file === 'routes/ai-proxy-passthrough.ts');

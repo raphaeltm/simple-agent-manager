@@ -198,6 +198,36 @@ func TestHandlePromptDoesNotRetryNonRetryableError(t *testing.T) {
 	}
 }
 
+// Idea 01M89JXTFHW4W3PQ65GTED6D0K: SAM's own AI usage limit is a 429, but retrying cannot help.
+// A provider 429 control with the same shape still retries.
+func TestHandlePromptDoesNotRetrySAMUsageLimit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		message  string
+		requests int
+	}{
+		// Both carry rate_limit_error, which isTransientProviderPromptError treats as retryable.
+		{"SAM limit fails at once", "Internal error: API Error: 429 " + samAdminCapBody, 1},
+		{"control: provider 429 retries", "Internal error: API Error: 429 " + providerRateBody, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, server := newPromptRetryTestHost(t, promptRetryScript{
+				responses: []promptRetryResponse{{errMessage: tc.message}, {errMessage: tc.message}, {errMessage: tc.message}},
+			})
+			done := make(chan error, 1)
+			host.config.OnPromptComplete = func(_ string, promptErr error) { done <- promptErr }
+			host.HandlePrompt(context.Background(), json.RawMessage(`9`), promptRetryParams(), "viewer-1", false)
+			if promptErr := <-done; promptErr == nil {
+				t.Fatal("prompt succeeded, want the 429 error")
+			}
+			if got := server.RequestCount(); got != tc.requests {
+				t.Fatalf("prompt request count = %d, want %d", got, tc.requests)
+			}
+		})
+	}
+}
+
 type promptRetryResponse struct {
 	beforeReply func(*promptRetryFakeAgent)
 	errMessage  string

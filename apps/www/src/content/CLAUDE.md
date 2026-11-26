@@ -41,6 +41,8 @@ excerpt: "One or two sentences that appear on the blog index card and in meta de
 |-------|-------------|
 | `socialImage` | Optional site-relative or absolute URL for a post-specific Open Graph and X card image. Prefer a branded 1200×630 image over the shared default. |
 | `draft` | Set to `true` to exclude from the published blog. Defaults to `false`. |
+| `pinned` | Set to `true` to show the post first on the blog index, above the date-ordered grid, as a full-width card. Posts tagged `security` get the amber "Pinned · Security advisory" treatment. Remove it when the post is no longer news. Defaults to `false`. |
+| `pinnedUntil` | Optional date the pin ends (exclusive, midnight UTC), e.g. `2026-12-09`. Checked when the site builds; `deploy-www.yml` rebuilds daily at 04:17 UTC, so the pin drops off at the first rebuild on or after that date. Leave it out to pin until you remove `pinned`. |
 
 ### Categories
 

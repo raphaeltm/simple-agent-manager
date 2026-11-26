@@ -13,6 +13,7 @@ import { LOCAL_BUNDLE_SUBDIR } from '../../deploy/selfhost/key-agent/bundle-stor
 import { loadBox, log, SELFHOST_DIR } from './backup-cli';
 import { composeArgs, runRestore } from './backup-lib';
 import { expectedComposeProjectFor } from './install-record';
+import { useOperatorUmask } from './operator-files';
 
 const { values } = parseArgs({
   options: {
@@ -23,6 +24,8 @@ const { values } = parseArgs({
     'state-dir': { type: 'string' },
   },
 });
+// Operator commands never inherit a restrictive umask (operator-files.ts).
+useOperatorUmask();
 if (!values.from) throw new Error('--from <backup directory> is required');
 const from = resolve(values.from);
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));

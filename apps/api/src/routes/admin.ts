@@ -95,6 +95,9 @@ adminRoutes.get('/users', async (c) => {
   });
 });
 
+/** Retry epoch for an account suspended before its start was recorded: every removal counts. */
+const UNKNOWN_SUSPENSION_START = new Date(0);
+
 /**
  * PATCH /api/admin/users/:userId - Approve or suspend a user
  * Body: { action: 'approve' | 'suspend' }
@@ -111,7 +114,13 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
   }
 
   const target = await db
-    .select({ id: schema.users.id, role: schema.users.role })
+    .select({
+      id: schema.users.id,
+      role: schema.users.role,
+      status: schema.users.status,
+      suspendedAt: schema.users.suspendedAt,
+      updatedAt: schema.users.updatedAt,
+    })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .get();
@@ -126,17 +135,27 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
   }
 
   const newStatus: UserStatus = body.action === 'approve' ? 'active' : 'suspended';
+  const now = new Date();
+  // Suspending an already suspended account is a retry: keep the original start, so memberships
+  // removed since then are still closed however many retries or other account edits came between.
+  // An account suspended before `suspended_at` existed (migration 0270) has no known start: its
+  // retries cover every removed membership, and its `suspended_at` stays null. `updated_at` is not
+  // a substitute, because retries and role changes rewrite it.
+  const alreadySuspended = target.status === 'suspended';
+  const recordedStart = target.suspendedAt instanceof Date ? target.suspendedAt : null;
+  const suspendedSince = !alreadySuspended ? now : (recordedStart ?? UNKNOWN_SUSPENSION_START);
 
   await db
     .update(schema.users)
     .set({
       status: newStatus,
-      updatedAt: new Date(),
+      suspendedAt: newStatus !== 'suspended' ? null : alreadySuspended ? recordedStart : now,
+      updatedAt: now,
     })
     .where(eq(schema.users.id, userId));
 
   // Requests stop at the account-status check; open project sockets must be closed too.
-  if (newStatus === 'suspended') await closeSuspendedUserSockets(c.env, userId);
+  if (newStatus === 'suspended') await closeSuspendedUserSockets(c.env, userId, suspendedSince);
 
   return c.json({ id: userId, status: newStatus });
 });

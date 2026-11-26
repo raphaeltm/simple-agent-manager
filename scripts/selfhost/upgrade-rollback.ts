@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { composeArgs, composeRunEnv } from './backup-lib.js';
+import { checkoutWithTrackedModes } from './operator-files.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { recoverRollbackState } from './rollback-state.js';
 import { type BoxContext, recoverUpgrade, UPGRADE_PENDING_FILE } from './upgrade-lib.js';
@@ -49,7 +50,7 @@ export async function runManualRollback(
       /* best effort */
     }
     try {
-      const checkout = ctx.run('git', ['checkout', '--detach', operatorRef]);
+      const checkout = checkoutWithTrackedModes(ctx.run, operatorRef, ctx.log);
       if (checkout.status === 0) ctx.run('pnpm', ['install', '--frozen-lockfile']);
     } catch {
       /* best effort; keep the application stopped */

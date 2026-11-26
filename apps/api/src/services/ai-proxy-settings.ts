@@ -7,8 +7,24 @@ import type { AdminSettingDefinition } from './admin-setting-definitions';
 export const AI_PROXY_DIRECT_UPSTREAM_SETTING = 'aiProxy.directUpstreamEnabled' as const;
 export const AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING =
   'aiProxy.perUserMonthlyCostCeilingUsd' as const;
+/** Test-only fake upstream (`ai-test-upstream.ts`): users whose platform-funded calls it answers. */
+export const AI_TEST_UPSTREAM_USER_IDS_SETTING = 'aiProxy.testUpstreamUserIds' as const;
+/** Test-only fake upstream: list-price cost, in US cents, each fake call reports. */
+export const AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING =
+  'aiProxy.testUpstreamCostPerCallCents' as const;
+/** Default fake cost: $0.40, so a $1 cap admits three calls and refuses the fourth. */
+export const DEFAULT_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS = 40;
+/** Most user ids the fake-upstream allowlist holds; it is read on every proxy call of a test install. */
+const MAX_AI_TEST_UPSTREAM_USER_IDS = 50;
+/** Longest accepted user id in that allowlist. */
+const MAX_AI_TEST_UPSTREAM_USER_ID_LENGTH = 128;
+/** Representation bound for the fake cost: $100 per call. */
+const MAX_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS = 10_000;
 export type AiProxySettingName =
-  typeof AI_PROXY_DIRECT_UPSTREAM_SETTING | typeof AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING;
+  | typeof AI_PROXY_DIRECT_UPSTREAM_SETTING
+  | typeof AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING
+  | typeof AI_TEST_UPSTREAM_USER_IDS_SETTING
+  | typeof AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING;
 
 export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
   {
@@ -39,5 +55,41 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
       Number.isSafeInteger(value) &&
       value >= 0 &&
       value <= Number.MAX_SAFE_INTEGER,
+  },
+  {
+    name: AI_TEST_UPSTREAM_USER_IDS_SETTING,
+    type: 'string-list',
+    defaultValue: [],
+    category: 'AI models',
+    description:
+      'TEST INSTALLATIONS ONLY. User ids whose SAM-managed ("sam" mode) model calls are answered by a built-in fake model instead of Anthropic or OpenAI, so AI metering and spending limits can be tested with no AI key. Each fake call reports the usage that costs aiProxy.testUpstreamCostPerCallCents at the model\'s list price, and is metered and capped like a real call. Empty (the default) means off. Ignored unless the deployment sets AI_TEST_UPSTREAM_ENABLED=true on a staging, test or self-host installation (never production) without an AI Gateway. Every other user keeps the real model. Fake spend is recorded in the listed users\' real daily and monthly counters. Passthrough (custom endpoint) calls are not faked and still spend the real key.',
+    secret: false,
+    // Redirects the listed users' agents to a fake model.
+    risky: true,
+    validate: (value) =>
+      Array.isArray(value) &&
+      value.length <= MAX_AI_TEST_UPSTREAM_USER_IDS &&
+      value.every(
+        (entry) =>
+          typeof entry === 'string' &&
+          entry.trim().length > 0 &&
+          entry.length <= MAX_AI_TEST_UPSTREAM_USER_ID_LENGTH
+      ),
+  },
+  {
+    name: AI_TEST_UPSTREAM_COST_PER_CALL_CENTS_SETTING,
+    type: 'integer',
+    defaultValue: DEFAULT_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS,
+    category: 'AI models',
+    description:
+      "TEST INSTALLATIONS ONLY. List-price cost, in US cents, that each fake model call reports (see aiProxy.testUpstreamUserIds). The fake sizes its reported output tokens so the model's catalog price comes to this amount; a model with no catalog price costs $0.",
+    secret: false,
+    risky: false,
+    range: { min: 0, max: MAX_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS },
+    validate: (value) =>
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= MAX_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS,
   },
 ];

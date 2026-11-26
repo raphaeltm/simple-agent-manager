@@ -122,6 +122,8 @@ export const users = sqliteTable('users', {
   // User approval / invite-only mode
   role: text('role').notNull().default('user'), // 'superadmin' | 'admin' | 'user'
   status: text('status').notNull().default('active'), // 'active' | 'pending' | 'suspended'
+  /** Start of the current suspension; null unless suspended (migration 0270). */
+  suspendedAt: integer('suspended_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })
     .notNull()
     .default(sql`(cast(unixepoch() * 1000 as integer))`),
