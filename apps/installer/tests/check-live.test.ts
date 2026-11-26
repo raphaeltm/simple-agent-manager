@@ -22,6 +22,8 @@ interface Options {
   timeoutMs?: string;
   pollMs?: string;
   origin?: string;
+  /** Sign-in attempts answered 503 before the secret has reached that edge. */
+  unconfiguredStarts?: number;
   /** Where the installer sends the sign-in; null sends no Location. */
   startLocation?: string | null;
 }
@@ -37,6 +39,7 @@ async function check(options: Options = {}) {
   vi.stubEnv('INSTALLER_READY_TIMEOUT_MS', options.timeoutMs ?? '0');
   vi.stubEnv('INSTALLER_READY_POLL_MS', options.pollMs ?? '1');
   let staleHealthChecks = options.staleHealthChecks ?? 0;
+  let unconfiguredStarts = options.unconfiguredStarts ?? 0;
   const deployedOrigin = options.origin ?? ORIGIN;
   const authorize = new URL('https://dash.cloudflare.com/oauth2/auth');
   authorize.search = new URLSearchParams({
@@ -74,6 +77,11 @@ async function check(options: Options = {}) {
       if (url.pathname === '/oauth/start' && init.method === 'POST') {
         if (new Headers(init.headers).get('Origin') !== ORIGIN)
           return Response.json({ error: 'Forbidden' }, { status: 403 });
+        if (unconfiguredStarts-- > 0)
+          return Response.json(
+            { error: 'Cloudflare sign-in is not configured yet.' },
+            { status: 503 }
+          );
         return new Response(null, {
           status: options.startStatus ?? 303,
           headers:
@@ -123,6 +131,18 @@ describe('live check of a deployed installer', () => {
     await expect(
       check({ sha: 'c'.repeat(40), timeoutMs: '30', pollMs: '2147483647' })
     ).rejects.toThrow('is not ready');
+  });
+  it('waits for sign-in to be configured at the edge it reaches', async () => {
+    expect(await check({ unconfiguredStarts: 2, timeoutMs: '5000' })).toContain('Installer live');
+    const starts = vi
+      .mocked(fetch)
+      .mock.calls.filter(([input]) => String(input).endsWith('/oauth/start'));
+    expect(starts).toHaveLength(3);
+  });
+  it('fails when sign-in stays unconfigured past the deadline', async () => {
+    await expect(check({ unconfiguredStarts: 1e6, timeoutMs: '30' })).rejects.toThrow(
+      'Sign-in did not redirect to Cloudflare (status 503)'
+    );
   });
   it('reports what it last saw when the installer never converges', async () => {
     await expect(check({ sha: 'c'.repeat(40) })).rejects.toThrow(

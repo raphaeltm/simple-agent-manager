@@ -48,7 +48,15 @@ for (;;) {
   if (Date.now() >= deadline) throw new Error(`Installer at ${origin} is not ready; ${last}`);
   await sleepWithin(deadline, pollMs);
 }
-const start = await read('/oauth/start', { method: 'POST', headers: { Origin: origin } });
+// The health answer above came from one edge location. A just-written OAuth secret can
+// still be missing at another, where sign-in answers 503 "not configured yet", so that one
+// status is retried inside the same deadline. Anything else is judged at once.
+let start;
+for (;;) {
+  start = await read('/oauth/start', { method: 'POST', headers: { Origin: origin } });
+  if (start.status !== 503 || Date.now() >= deadline) break;
+  await sleepWithin(deadline, pollMs);
+}
 const location = start.headers.get('Location') || '';
 let target;
 try {
