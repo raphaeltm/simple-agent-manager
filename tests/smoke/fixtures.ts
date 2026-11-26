@@ -9,7 +9,11 @@ export { expect } from '@playwright/test';
  */
 const DEPLOY_CHECK_HEADER = 'x-sam-deploy-check';
 
-/** Headers for direct API calls (APIRequestContext), empty when the secret is not configured. */
+/**
+ * Headers for one direct API call (APIRequestContext) to the smoke-test app or API, empty when the
+ * secret is not configured. Pass it per call, never as context-wide `extraHTTPHeaders`, so the
+ * value is only ever sent to the deployment under test.
+ */
 export function deployCheckHeaders(): Record<string, string> {
   const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
   return value ? { [DEPLOY_CHECK_HEADER]: value } : {};
@@ -37,10 +41,5 @@ export const test = base.extend({
       );
     }
     await use(context);
-  },
-  request: async ({ playwright }, use) => {
-    const request = await playwright.request.newContext({ extraHTTPHeaders: deployCheckHeaders() });
-    await use(request);
-    await request.dispose();
   },
 });

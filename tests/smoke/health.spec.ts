@@ -1,10 +1,10 @@
-import { expect, test } from './fixtures';
+import { deployCheckHeaders, expect, test } from './fixtures';
 
 const API_URL = process.env.SMOKE_TEST_API_URL || 'https://api.sammy.party';
 
 test.describe('Health checks', () => {
   test('API health endpoint returns healthy', async ({ request }) => {
-    const response = await request.get(`${API_URL}/health`);
+    const response = await request.get(`${API_URL}/health`, { headers: deployCheckHeaders() });
     expect(response.ok()).toBe(true);
     const body = await response.json();
     expect(body.status).toBe('healthy');
@@ -13,7 +13,7 @@ test.describe('Health checks', () => {
   test('API returns CORS headers for app origin', async ({ request }) => {
     const appUrl = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
     const response = await request.get(`${API_URL}/health`, {
-      headers: { Origin: appUrl },
+      headers: { Origin: appUrl, ...deployCheckHeaders() },
     });
     expect(response.ok()).toBe(true);
   });

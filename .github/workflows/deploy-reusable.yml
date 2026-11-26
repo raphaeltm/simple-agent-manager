@@ -2108,18 +2108,26 @@ jobs:
           echo "Waiting for API to be ready at $API_URL..."
 
           # When the zone's "SAM deploy checks" Cloudflare skip rule is configured, send its header so
-          # stricter zone protections do not block this runner. The value goes from the secret to curl
-          # on stdin (-H @-): never a command-line argument, never printed (rule 83).
-          deploy_check_curl() {
-            if [ -n "${DEPLOY_CHECK_HEADER_VALUE:-}" ]; then
-              printf 'x-sam-deploy-check: %s\n' "$DEPLOY_CHECK_HEADER_VALUE" | curl -sf -H @- "$@"
-            else
-              curl -sf "$@"
-            fi
+          # stricter zone protections do not block this runner. Node reads the secret directly from
+          # its own environment and prints only the /health body: the value is never formatted,
+          # passed as an argument or printed (rule 83).
+          health_body() {
+            node -e '
+              const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
+              fetch(`${process.env.API_URL}/health`, {
+                headers: value ? { "x-sam-deploy-check": value } : {},
+                signal: AbortSignal.timeout(15000),
+              })
+                .then(async (res) => {
+                  if (!res.ok) process.exit(1);
+                  process.stdout.write(await res.text());
+                })
+                .catch(() => process.exit(1));
+            '
           }
 
           for i in {1..30}; do
-            RESPONSE=$(deploy_check_curl "$API_URL/health" 2>/dev/null) || {
+            RESPONSE=$(health_body 2>/dev/null) || {
               echo "Waiting for API... ($i/30)"
               sleep 10
               continue
