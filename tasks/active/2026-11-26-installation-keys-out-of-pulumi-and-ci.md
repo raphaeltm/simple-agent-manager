@@ -17,7 +17,40 @@ installer installs) and "self-hosted VM" installs (celld box). No "hosted SAM".
 
 ## Status
 
-**Phase 1 (design) — reported to the coordinator, waiting for go before building.**
+Phase 1 design approved by the coordinator (2026-11-26). Phase 2 in progress on
+`sam/self-hosted-cloudflare-installs-vxjb78`, stacked on PR #3011 (merged in at 52e839dc6) and
+on merged PR #3016 (no Pulumi state export in CI, guard rule `state-export`).
+
+### Decisions (Raphaël, relayed by the coordinator)
+
+- **D1 custody:** Cloudflare only. "I'd rather risk losing all keys than exposing them." No custody
+  hook: nothing may export, display or return a key. (Design section E's hook is dropped.)
+- **D2 purge:** not automated. After every installation is migrated and verified, give him a
+  step-by-step runbook to purge Pulumi history/backups himself (runbook below, filled in at the end).
+- **D3:** approved as a FOLLOW-UP PR: retire origin-ca-key/CSR/cert from state and revoke the cert,
+  after confirming nothing uses it.
+- **D4:** he deletes the `DEPLOY_SIGNING_*` GitHub Environment secrets; tell the coordinator when
+  safe (after production and staging are migrated).
+- Key rotation for self-hosted Cloudflare: next task, not this one.
+
+### Design changes after review with #3011's owner
+
+- Retirement runs LAST before `pulumi up`, after both takeover gates, not before them: a refused
+  takeover must leave the deploy state untouched (a fork's old workflow would otherwise mint new
+  keys over the Worker's).
+- Gates preview with `--exclude <key URNs + marker>` rather than an allowance for deletes: a
+  preview that plans a RandomId deletion (and a `--refresh` preview of one) carries its raw id.
+- A protected, non-secret marker resource `installation-keys-retired` makes an old release's
+  `pulumi up` fail before its configure-secrets.sh could rewrite keys (verified locally; old
+  releases use `--skip-preview`, so they create throwaway RandomIds first, never the live keys).
+- Key creation also requires the D1 `users` table to be empty (condition, not proxy: rule 74).
+
+### Findings
+
+- Historical public log scan (2026-08-20 onward, 2608 runs, ~13.7M lines): zero key values found
+  (counts only; details in the coordinator report).
+- `pulumi preview --diff`, `destroy --diff` and `preview --json`/`--refresh --json` carry a
+  RandomId's raw id when it is deleted/refreshed; plain `up`/`destroy`/`refresh` do not.
 
 ## Research findings
 
@@ -181,23 +214,34 @@ Update `CLAUDE.md` "Generated platform secrets" and Architecture Principle 3, `.
 - **D4** (manual, not blocking): after production/staging migrate, delete the now-unused
   `DEPLOY_SIGNING_PRIVATE_KEY`/`DEPLOY_SIGNING_PUBLIC_KEY` GitHub Environment secrets (they are copies).
 
-## Implementation checklist (Phase 2, after the coordinator's go)
+## Implementation checklist (Phase 2)
 
-- [ ] Base on PR #3011 (merged, or its branch with its owner's agreement)
-- [ ] Extract key generators shared by `platform-keys.ts` and `installation-keys.ts`
-- [ ] `installation-keys.ts`: `inspect`, `create` (all-absent only, one atomic write), CLI refusing CI
-- [ ] Engine phase `installation-keys` (create on fresh installer installs, inspect otherwise)
-- [ ] Engine + workflow step `retire-key-resources` before any preview/up; dry-run reports only
-- [ ] Remove key resources and outputs from `infra/resources/secrets.ts` and `infra/index.ts`
-- [ ] `configure-secrets.sh`: remove all key handling; names-only check
-- [ ] `deploy-reusable.yml`, `installer-engine-ci.ts`, `installer-engine-ci-env.json`: stop passing keys
-- [ ] Remove the readback allowlist entry and marker support in `check-no-secret-readback.ts`
-- [ ] Tests: migration of a stack with key resources (values preserved), takeover after migration,
-      missing-key deploy fails without generating, fresh-install create, partial refuses,
-      canary no-print test, grep guards (`--show-secrets`, infra key outputs, workflow key names)
-- [ ] Docs/rules (section F)
+- [x] First, separate PR: no `pulumi stack export` in CI + `state-export` guard (#3016, merged 6159fdf7b)
+- [x] Base on PR #3011's branch (merged in; rebase onto main after it merges)
+- [x] `installation-keys.ts`: inspect (names only), create (no keys + no users, one secrets-bulk
+      write, returns nothing), require, CLI (`check`, `check-listing`, `create` refusing CI);
+      reuses the generators the self-hosted VM install uses (`generate-keys.ts`, `deploy-signing-keys.ts`)
+- [x] Engine phase `installation-keys` (create only for a fresh non-adoption installer install)
+- [x] `retire-key-resources.ts` + engine `applyInfrastructure`: gates `--exclude`, retire last before up
+- [x] Workflow: retire step between Pulumi Refresh and Pulumi Up; dry-run preview excludes
+- [x] Remove key resources and outputs from `infra`; add the retirement marker
+- [x] `configure-secrets.sh`: no key handling; names-only check via `wrangler secret list`
+- [x] `deploy-reusable.yml`, `installer-engine-ci.ts`, `installer-engine-ci-env.json`: no key inputs
+- [x] `ALLOWED_LEGACY_READS` empty
+- [x] Tests (engine migration/takeover/refusal/missing key/fresh create canary; configure-secrets via
+      real check; workflow guards; infra guards; unit tests)
+- [x] Docs/rules (section F)
+- [ ] Supersede `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`
+- [ ] Specialist reviews: security-auditor, cloudflare-specialist, env-validator, task-completion-validator
 - [ ] Staging: migrate staging, verify sign-in, credential decrypt, VM callback verification; then staging2
 - [ ] Production plan reported to coordinator before merge
+- [ ] D2 purge runbook (below) written once everything is migrated
+- [ ] Tell the coordinator when D4 is safe
+- [ ] D3 follow-up PR (Origin CA)
+
+## D2: manual Pulumi history purge runbook (for Raphaël; fill in after migration)
+
+_To be written once production, staging and staging2 are migrated and verified._
 
 ## Acceptance criteria
 
