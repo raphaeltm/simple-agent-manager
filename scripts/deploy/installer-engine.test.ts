@@ -352,6 +352,8 @@ describe('installation engine', () => {
       entry.args.includes('scripts/deploy/configure-agent-email.ts')
     );
     expect(email?.env.AGENT_EMAIL_ENABLED).toBe('true');
+    // A new installation may onboard the sending subdomain; only an adopted one may not.
+    expect(email?.env.AGENT_EMAIL_EXISTING_ONLY).toBeUndefined();
     // The installation's deployment token, never the runtime one.
     expect(email?.env.CF_API_TOKEN).toBe(privateEnv.CF_API_TOKEN);
     const calls = f.commands.map((entry) => entry.args.join(' '));
@@ -1265,6 +1267,8 @@ describe('installation engine: adopting an existing deployment', () => {
     setupForce?: string;
     /** Active superadmins in the deployed database, not counting the system row. */
     owners?: number;
+    /** The deployed API Worker has the agent email binding. */
+    emailBinding?: boolean;
     /** `pulumi stack` cannot open the state's secrets: exit 1 with this failure tail. */
     unopenableStateTail?: string[];
   }
@@ -1357,6 +1361,7 @@ describe('installation engine: adopting an existing deployment', () => {
                 { type: 'plain_text', name: 'CONNECTOR_ENABLED', text: 'false' },
                 { type: 'plain_text', name: 'VM_AGENT_TRANSPORT', text: 'vm-public-dns' },
                 { type: 'secret_text', name: 'CF_CONTAINER_ENABLED' },
+                ...(world.emailBinding ? [{ type: 'send_email', name: 'AGENT_EMAIL' }] : []),
               ],
             },
           });
@@ -1642,6 +1647,37 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  const emailCommand = (f: ReturnType<typeof adoptionFixture>) =>
+    f.commands.find((entry) => entry.args.includes('scripts/deploy/configure-agent-email.ts'));
+  const emailMarker = (f: ReturnType<typeof adoptionFixture>) =>
+    join(f.root, '.wrangler', 'agent-email-domain');
+
+  it('sets up no email on a takeover of a deployment that has none', async () => {
+    // Preparing email onboards a sending subdomain and writes its DNS records, which the
+    // takeover's no-change checks never see.
+    const f = adoptionFixture();
+    // A marker left by an earlier run in this checkout would make sync add the binding.
+    mkdirSync(join(f.root, '.wrangler'), { recursive: true });
+    writeFileSync(emailMarker(f), 'agents.example.org');
+    expect((await run(adopted, f)).error).toBeUndefined();
+    expect(emailCommand(f)).toBeUndefined();
+    expect(existsSync(emailMarker(f))).toBe(false);
+    // Liveness: the rest of the phase ran.
+    expect(f.lines().some((line) => line.includes('sync-wrangler-config.ts'))).toBe(true);
+  });
+
+  it('keeps the email an adopted deployment has, from what exists only', async () => {
+    const f = adoptionFixture({ emailBinding: true });
+    expect((await run(adopted, f)).error).toBeUndefined();
+    expect(emailCommand(f)?.env.AGENT_EMAIL_ENABLED).toBe('true');
+    expect(emailCommand(f)?.env.AGENT_EMAIL_EXISTING_ONLY).toBe('true');
+    // And on every later update of that installation.
+    const later = adoptionFixture({ emailBinding: true });
+    const update = { ...adopted, adoption: { ...adoption, takeover: false } };
+    expect((await run(update, later)).error).toBeUndefined();
+    expect(emailCommand(later)?.env.AGENT_EMAIL_EXISTING_ONLY).toBe('true');
   });
 
   it('refuses a takeover whose passphrase does not open the deploy state, before anything else', async () => {

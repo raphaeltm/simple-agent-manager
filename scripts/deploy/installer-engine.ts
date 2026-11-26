@@ -5,6 +5,7 @@ import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
 import {
+  deployedAgentEmail,
   keepAdoptedDeployment,
   refuseForcedSetup,
   refuseRollback,
@@ -469,7 +470,12 @@ export async function runInstallerEngine(
     });
     if (c.profile === 'legacy-ci')
       await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
-    else await prepareInstallationEmail();
+    else if (!c.adoption) await prepareInstallationEmail();
+    else if (await deployedAgentEmail({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` })) {
+      // An adopted deployment keeps the email it has, and this step creates nothing for it.
+      env.AGENT_EMAIL_EXISTING_ONLY = 'true';
+      await prepareInstallationEmail();
+    } else rmSync(join(root, '.wrangler', AGENT_EMAIL_MARKER_FILE), { force: true });
     await sync();
     await script('configure-r2-cors.sh');
     await script('configure-ai-gateway.sh');

@@ -374,4 +374,14 @@ Wrong passphrase (auditor LOW-1), measured offline on Pulumi 3.278 with a file b
 
 Addressed in docs and page copy: enter the passphrase only at an installer you trust (MEDIUM-1), retire the fork's Cloudflare token, R2 key and GitHub Environment secrets after a takeover (MEDIUM-2), the administrator email is not used to change administrators (INFO-3).
 
-Deferred, with reasons, to idea 01M8C88CXH9YTBZ4X3TDN1GP7J's sibling (see PR body): taking the passphrase at the service instead of the installer (design change to the handoff), scoping the deployment token to one deployment (applies to every installation, not only takeovers), route-steering consistency check (the no-change gate and the owner's review already stop it), global recovery rate limit and short-secret redaction (existing service behaviour, not introduced here).
+Deferred, with reasons, to idea 01M8CDVGG5CT46TERWD3HJP9PP: taking the passphrase at the service instead of the installer (design change to the handoff), scoping the deployment token to one deployment (applies to every installation, not only takeovers), route-steering consistency check (the no-change gate and the owner's review already stop it), global recovery rate limit and short-secret redaction (existing service behaviour, not introduced here).
+
+## Codex round 12 (on 2353f1725): email provisioning outside the takeover gates
+
+Finding: `configure-services` ran `prepareInstallationEmail()` for adopted deploys, which can onboard `agents.<domain>` for sending and create its DNS records after both no-change gates passed. Valid.
+
+Fix: an adopted deploy (takeover and every later update) prepares email only when the deployed API Worker already has the `AGENT_EMAIL` binding (`deployedAgentEmail`), and then with `AGENT_EMAIL_EXISTING_ONLY=true`, a new mode of `configure-agent-email.ts` that uses the sending subdomain only if it exists and writes nothing. Without the binding the step is skipped and a stale marker is removed, so sync does not add the binding. Known limit, noted next to the guard and on idea 01M8C88CXH9YTBZ4X3TDN1GP7J: an adopted installation without email cannot get it from the service yet.
+
+Mutations: adoption prepares email like a new install (red: `sets up no email on a takeover of a deployment that has none`, `keeps the email an adopted deployment has, from what exists only`); flag dropped (second red); stale marker kept (first red); binding never seen (second red); script ignores `existingOnly` (red: both `with existingOnly` tests in `scripts/quality/deploy-agent-email.test.ts`).
+
+Other writes of the same phase were read and left as they are, and are now documented under "What the deploy itself applies": the assets bucket's upload CORS rule, the AI Gateway when the account lacks it, the tail Worker. Each is configuration the approved source needs and a fork's deploy applies the same.
