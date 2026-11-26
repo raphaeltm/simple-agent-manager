@@ -302,3 +302,11 @@ as the resource updated in place. The provider rewrites the Pages project on eve
   look like an override, and it stays pinned. A fix needs a durable record of override names whose
   home is a design choice (Worker var, service manifest, or state bucket). Tracked as idea
   01M8C88CXH9YTBZ4X3TDN1GP7J, cited in the code; the guide's claim was corrected.
+- Also from the keys task's local Pulumi run: on a SUCCESSFUL `preview --refresh --json` the refresh
+  step of a key resource carries the raw key (old and new state `id`, and its outputs). So while
+  keys are still in Pulumi state, every takeover check brings them into the engine process's
+  memory, in the owner's own builder container. They are never reported, saved or passed on: the
+  takeover test's preview fixture now has that real shape with a canary key, and asserts the canary
+  reaches no event, result, command argument or command environment (proven by leaking it into the
+  environment once). The keys task removes the exposure by excluding the key resources from the
+  previews.

@@ -1179,6 +1179,27 @@ describe('installation engine: adopting an existing deployment', () => {
     urn: 'urn:pulumi:prod::sam::cloudflare:index/d1Database:D1Database::sam-db',
   };
 
+  // The shape `pulumi preview --refresh --json` really emits for a key resource (Pulumi 3.278):
+  // a refresh step whose old and new state carry the RandomId's `id`, which is the raw key.
+  const rawKeyInState = 'CANARY-raw-encryption-key-in-preview-state';
+  const keyState = {
+    custom: true,
+    id: rawKeyInState,
+    inputs: { byteLength: 32 },
+    outputs: { b64Std: rawKeyInState, b64Url: rawKeyInState, id: rawKeyInState },
+    protect: true,
+    type: 'random:index/randomId:RandomId',
+    urn: 'urn:pulumi:prod::sam::random:index/randomId:RandomId::encryption-key',
+  };
+  const keyRefresh = {
+    op: 'refresh',
+    urn: keyState.urn,
+    provider: 'urn:pulumi:prod::sam::pulumi:providers:random::default::id',
+    oldState: keyState,
+    newState: keyState,
+    detailedDiff: null,
+  };
+  const keySame = { op: 'same', urn: keyState.urn, oldState: keyState, newState: keyState };
   // What a routine deploy of an unchanged SAM reports: the provider rewrites the Pages project.
   const pagesUpdate = {
     op: 'update',
@@ -1232,7 +1253,11 @@ describe('installation engine: adopting an existing deployment', () => {
           previewOptions.push({ privateOutput: options.privateOutput });
           if (world.previewFailureTail)
             throw new EngineCommandFailure(1, null, world.previewFailureTail);
-          const first = world.preview ?? { steps: [sameStep, pagesUpdate] };
+          const first = world.preview ?? {
+            changeSummary: { same: 2, update: 1 },
+            duration: 1,
+            steps: [keyRefresh, keySame, sameStep, pagesUpdate],
+          };
           return JSON.stringify(
             command.args.includes('--refresh') ? first : (world.previewBeforeUp ?? first)
           );
@@ -1314,7 +1339,7 @@ describe('installation engine: adopting an existing deployment', () => {
 
   it('takes over without creating state, after a clean preview, keeping keys, settings and users', async () => {
     const f = adoptionFixture();
-    const { state, error, results } = await run(adopted, f);
+    const { state, error, results, events } = await run(adopted, f);
     expect(error).toBeUndefined();
     expect(state?.status).toBe('completed');
     const calls = f.lines();
@@ -1353,6 +1378,12 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(secrets?.env.AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET).toBe('true');
     // No setup token: the adopted deployment already has an owner.
     expect(results).toEqual([]);
+    // The previews carried a raw key in their state; none of it left the gate.
+    expect(JSON.stringify(events)).not.toContain(rawKeyInState);
+    expect(JSON.stringify(results)).not.toContain(rawKeyInState);
+    expect(JSON.stringify(f.commands.map((entry) => [entry.args, entry.env]))).not.toContain(
+      rawKeyInState
+    );
     // The databases keep their read-replication mode; the other service steps still run.
     expect(calls.some((line) => line.includes('configure-d1-read-replication.sh'))).toBe(false);
     expect(calls.some((line) => line.includes('configure-r2-cors.sh'))).toBe(true);
