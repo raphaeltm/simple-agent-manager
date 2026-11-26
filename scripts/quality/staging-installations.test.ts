@@ -399,8 +399,31 @@ describe('deploy-staging.yml smoke-token probe', () => {
 
   it('skips only on a refusal and never prints the token', () => {
     expect(probe).toContain('if [ "$status" = "401" ]; then');
-    expect(probe).toContain('--data-binary @-');
+    // Rule 83: the consumer reads each secret straight from its own environment and prints only
+    // the HTTP status; neither value is formatted, piped or passed as an argument by the shell.
+    expect(probe).toContain('process.env.SMOKE_TEST_TOKEN');
+    expect(probe).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
+    expect(probe).toContain('process.stdout.write(String(res.status))');
     expect(probe).not.toMatch(/echo[^\n]*SMOKE_TEST_TOKEN/);
+    expect(probe).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
+    expect(probe).not.toMatch(/\$\{?SMOKE_TEST_TOKEN/);
+  });
+});
+
+describe('deploy-reusable.yml health check', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
+    'utf8'
+  );
+  const step =
+    workflow.match(/      - name: Health Check\n[\s\S]*?(?=\n      - name:|\n      #)/)?.[0] ?? '';
+
+  it('sends the deploy-check header without the shell touching the secret', () => {
+    expect(step).not.toBe('');
+    expect(step).toContain('DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}');
+    expect(step).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
+    expect(step).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
+    expect(step).not.toMatch(/echo[^\n]*DEPLOY_CHECK_HEADER_VALUE/);
   });
 });
 
