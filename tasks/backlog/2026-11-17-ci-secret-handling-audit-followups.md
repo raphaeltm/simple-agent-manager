@@ -5,7 +5,7 @@ Found by the audit of every workflow and the scripts they call for SAM task
 None of these prints a secret today. Each leaves a value GitHub may not mask in runner memory,
 on a command line or in a file, where one future `echo` or error path would print it. The
 staging2 bootstrap, the `configure-secrets.sh` readback (tracked separately in
-`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`), `set -x` and the raw
+`tasks/archive/2026-11-17-remove-pulumi-secret-readback.md`), `set -x` and the raw
 registry-credential dump were fixed in that task.
 
 ## Findings
@@ -40,7 +40,7 @@ registry-credential dump were fixed in that task.
    deploy-installer.yml and never masked. It is not printed today.
 6. **`RandomId` resource ids** hold raw key bytes in Pulumi state, and a replace could show them in
    `pulumi preview --diff` or `pulumi up`. This is covered by
-   `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`.
+   `tasks/archive/2026-11-17-remove-pulumi-secret-readback.md`.
 
 ## Checklist
 

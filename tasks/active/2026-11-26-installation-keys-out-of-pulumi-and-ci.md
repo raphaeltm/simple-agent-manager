@@ -231,7 +231,7 @@ Update `CLAUDE.md` "Generated platform secrets" and Architecture Principle 3, `.
 - [x] Tests (engine migration/takeover/refusal/missing key/fresh create canary; configure-secrets via
       real check; workflow guards; infra guards; unit tests)
 - [x] Docs/rules (section F)
-- [ ] Supersede `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`
+- [x] Supersede `tasks/archive/2026-11-17-remove-pulumi-secret-readback.md` (archived with a note)
 - [ ] Specialist reviews: security-auditor, cloudflare-specialist, env-validator, task-completion-validator
 - [ ] Staging: migrate staging, verify sign-in, credential decrypt, VM callback verification; then staging2
 - [ ] Production plan reported to coordinator before merge

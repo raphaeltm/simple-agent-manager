@@ -31,7 +31,7 @@
  * Only a `show-secrets` finding can be excused; a decryption, trace or dump next to a marker
  * is still reported.
  *
- *   # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
+ *   # sam:secret-readback-allowed tasks/backlog/<open-task-file>.md
  *
  * A marker naming an archived or missing task, or one not pinned to its file, does not count.
  *
