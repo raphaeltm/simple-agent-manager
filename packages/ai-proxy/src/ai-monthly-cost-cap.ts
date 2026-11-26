@@ -15,7 +15,7 @@ import {
   type GatewayMonthlyCost,
   gatewayMonthlySpendUsd,
   parseGatewayMonthlyCost,
-  resolveCostEstimateLagSeconds,
+  readCostEstimateLagSeconds,
   utcMonthKey,
 } from './ai-cost-estimate';
 import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
@@ -326,14 +326,4 @@ export async function checkGatewayCostAdmission(
     userSettings,
     monthlyCap: { allowed: costUsd < capUsd, costUsd, capUsd, ...source },
   };
-}
-
-async function readCostEstimateLagSeconds(ports: MonthlyCostCeilingPort): Promise<number> {
-  if (!ports.costEstimateGatewayLagSeconds) return resolveCostEstimateLagSeconds(undefined);
-  try {
-    return resolveCostEstimateLagSeconds(await ports.costEstimateGatewayLagSeconds());
-  } catch {
-    log.warn('ai_proxy.cost_estimate_lag_unreadable');
-    return resolveCostEstimateLagSeconds(undefined);
-  }
 }

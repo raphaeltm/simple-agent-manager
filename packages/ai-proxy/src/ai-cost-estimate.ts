@@ -20,7 +20,9 @@ import {
   DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
   MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS,
 } from '@simple-agent-manager/shared';
-import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
+import { log, maybeJsonRecord } from '@simple-agent-manager/worker-core';
+
+import type { AiProxyPorts } from './ports';
 
 /** Longest TTL the monthly cost cron may give its KV totals (`resolveMonthlyCostCacheTtlSeconds`). */
 export const MAX_MONTHLY_COST_CACHE_TTL_SECONDS = 86_400;
@@ -82,6 +84,13 @@ export interface GatewayMonthlyCost {
    * be low. The month estimate is then a floor (`gatewayMonthlySpendUsd`).
    */
   truncated: boolean;
+  /**
+   * The part of `costUsd` on logs created before `beforeMs` (`asOf` minus the lag margin): logs
+   * the gateway has finished writing. The next cron run adds only logs from `beforeMs` on, so two
+   * reads never count the same log (`runMonthlyCostAggregation`). Absent on legacy values and
+   * where no exact base exists yet.
+   */
+  settled?: { usd: number; beforeMs: number };
 }
 
 export function utcMonthKey(now: Date): string {
@@ -117,12 +126,15 @@ export function buildCostEstimateWrite(
 export function serializeGatewayMonthlyCost(
   costUsd: number,
   asOfMs: number,
-  truncated = false
+  truncated = false,
+  settled?: GatewayMonthlyCost['settled']
 ): string {
   return JSON.stringify({
     costUsd: Number(costUsd.toFixed(6)),
     asOfMs,
     ...(truncated ? { truncated: true } : {}),
+    // Kept unrounded: it is a running sum, and rounding it every hour would drift.
+    ...(settled ? { settledUsd: settled.usd, settledBeforeMs: settled.beforeMs } : {}),
   });
 }
 
@@ -142,10 +154,18 @@ export function parseGatewayMonthlyCost(raw: string | null): GatewayMonthlyCost 
     }
     const record = maybeJsonRecord(parsed);
     if (!record) return null;
-    const { costUsd, asOfMs, truncated } = record;
+    const { costUsd, asOfMs, truncated, settledUsd, settledBeforeMs } = record;
     if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0) return null;
     if (typeof asOfMs !== 'number' || !Number.isFinite(asOfMs)) return null;
-    return { costUsd, asOfMs, truncated: truncated === true };
+    const settled =
+      typeof settledUsd === 'number' &&
+      Number.isFinite(settledUsd) &&
+      settledUsd >= 0 &&
+      typeof settledBeforeMs === 'number' &&
+      Number.isFinite(settledBeforeMs)
+        ? { usd: settledUsd, beforeMs: settledBeforeMs }
+        : undefined;
+    return { costUsd, asOfMs, truncated: truncated === true, ...(settled ? { settled } : {}) };
   }
   const legacy = Number(trimmed);
   return trimmed !== '' && Number.isFinite(legacy) && legacy >= 0
@@ -223,4 +243,17 @@ export function resolveCostEstimateLagSeconds(value: unknown): number {
     value <= MAX_COST_ESTIMATE_GATEWAY_LAG_SECONDS
     ? value
     : DEFAULT_COST_ESTIMATE_GATEWAY_LAG_SECONDS;
+}
+
+/** The lag-margin admin setting through the ports; absent or unreadable means the default. */
+export async function readCostEstimateLagSeconds(
+  ports: Partial<Pick<AiProxyPorts, 'costEstimateGatewayLagSeconds'>>
+): Promise<number> {
+  if (!ports.costEstimateGatewayLagSeconds) return resolveCostEstimateLagSeconds(undefined);
+  try {
+    return resolveCostEstimateLagSeconds(await ports.costEstimateGatewayLagSeconds());
+  } catch {
+    log.warn('ai_proxy.cost_estimate_lag_unreadable');
+    return resolveCostEstimateLagSeconds(undefined);
+  }
 }
