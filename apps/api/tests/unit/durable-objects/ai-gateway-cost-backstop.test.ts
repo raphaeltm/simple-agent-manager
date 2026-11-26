@@ -1,5 +1,5 @@
 /**
- * Hosted SAM (AI Gateway installs): the monthly spending limit is enforced against the gateway's
+ * Self-hosted Cloudflare installs (AI Gateway): the monthly spending limit is enforced against the gateway's
  * hourly month total plus SAM's catalog-priced estimate of calls since that total was read
  * (packages/ai-proxy/src/ai-cost-estimate.ts). Exercised through the real worker gate, the real
  * response accounting and the real `AiTokenBudgetCounter` over SQLite; only the admin settings
@@ -25,6 +25,7 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
 import { recordOperatorStepUsage } from '../../../src/durable-objects/sam-session/operator/model';
 import type { Env } from '../../../src/env';
+import { runMonthlyCostAggregation } from '../../../src/services/ai-monthly-cost-cron';
 import { checkAiUsageGate, getProviderUsage } from '../../../src/services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../../src/services/ai-token-usage-accounting';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -52,6 +53,10 @@ function makeKv(): KVNamespace {
       return value === undefined ? null : type === 'json' ? JSON.parse(value) : value;
     }),
     put: vi.fn(async (key: string, value: string) => void rows.set(key, value)),
+    list: vi.fn(async ({ prefix = '' }: { prefix?: string } = {}) => ({
+      keys: [...rows.keys()].filter((name) => name.startsWith(prefix)).map((name) => ({ name })),
+      list_complete: true,
+    })),
   } as unknown as KVNamespace;
 }
 
@@ -140,6 +145,89 @@ describe('administrator ceiling on a gateway install', () => {
     await expect(gate()).resolves.toEqual({ allowed: true });
     setGatewayTotal(1, NOW - 10 * MINUTE);
     await expect(gate()).resolves.toMatchObject({ allowed: false });
+  });
+});
+
+describe('the cron total past its page cap, read by the gate', () => {
+  /** Serve one page of gateway logs (newest first) and report more pages than the cap allows. */
+  function serveTruncatedLogs(logs: Array<{ minutesAgo: number; cost: number }>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain('/ai-gateway/gateways/sam/logs');
+        const result = logs.map((log, i) => ({
+          id: `log-${i}`,
+          model: PRICED.id,
+          provider: 'openai',
+          tokens_in: 1,
+          tokens_out: 1,
+          cost: log.cost,
+          success: true,
+          cached: false,
+          created_at: new Date(NOW - log.minutesAgo * MINUTE).toISOString(),
+          duration: 1,
+          metadata: { userId: USER },
+        }));
+        return Response.json({
+          result,
+          result_info: {
+            page: 1,
+            per_page: 50,
+            count: result.length,
+            total_count: 5000,
+            total_pages: 100,
+          },
+          success: true,
+          errors: [],
+        });
+      })
+    );
+    env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES = '1';
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('refuses once new spend has pushed older logs out of the read (Codex P1 on #3015)', async () => {
+    setUserCap(0.55);
+    // The previous complete read: $0.50, all settled before 3 hours ago.
+    rows.set(
+      COST_KEY,
+      JSON.stringify({
+        costUsd: 0.5,
+        asOfMs: NOW - 120 * MINUTE,
+        settledUsd: 0.5,
+        settledBeforeMs: NOW - 180 * MINUTE,
+      })
+    );
+    // This read holds $0.10 of new spend and only $0.30 of the old logs: max(old, read) = $0.50.
+    serveTruncatedLogs([
+      { minutesAgo: 90, cost: 0.1 },
+      { minutesAgo: 200, cost: 0.3 },
+    ]);
+    await runMonthlyCostAggregation(env);
+    expect(parseGatewayMonthlyCost(rows.get(COST_KEY) ?? null)).toMatchObject({
+      costUsd: 0.6,
+      truncated: false,
+    });
+    await expect(gate()).resolves.toMatchObject({ allowed: false, monthlyCap: { capUsd: 0.55 } });
+  });
+
+  it('floors a total the read could not complete on the month estimate', async () => {
+    setUserCap(CALL_USD * 2.5);
+    await spendAt(NOW - 600 * MINUTE, 3);
+    rows.set(
+      COST_KEY,
+      JSON.stringify({
+        costUsd: 0,
+        asOfMs: NOW - 120 * MINUTE,
+        settledUsd: 0,
+        settledBeforeMs: NOW - 180 * MINUTE,
+      })
+    );
+    // The read reaches back only 30 minutes, short of the previous boundary: a lower bound.
+    serveTruncatedLogs([{ minutesAgo: 30, cost: 0 }]);
+    await runMonthlyCostAggregation(env);
+    expect(parseGatewayMonthlyCost(rows.get(COST_KEY) ?? null)).toMatchObject({ truncated: true });
+    await expect(gate()).resolves.toMatchObject({ allowed: false, reason: 'monthly-cost-cap' });
   });
 });
 
