@@ -510,6 +510,16 @@ export async function runInstallerEngine(
       ]);
       await execute('sudo', ['systemctl', 'restart', 'docker']);
     });
+  // Installation keys go straight into the API Worker and are never read back. Installer runs may
+  // create the ones it lacks (ENCRYPTION_KEY only for a brand-new installation); CI deploys and
+  // adoptions of an existing ENCRYPTION_KEY only require them.
+  const installationKeys = () =>
+    ensureInstallationKeys({
+      mayCreate: c.profile !== 'legacy-ci',
+      freshInstallation: !c.adoption,
+      worker: { ...cloudflareAccess, worker: apiWorker },
+      databaseId: output('d1DatabaseId'),
+    });
   await phase('bootstrap-api-tail', async () => {
     const images = await imageImport;
     if (Object.keys(images).length) {
@@ -517,20 +527,17 @@ export async function runInstallerEngine(
       await sync();
     }
     const firstDeploy = existsSync(join(root, '.wrangler/api-worker-first-deploy'));
-    if (firstDeploy) await deployApi();
+    if (firstDeploy) {
+      await deployApi();
+      // The Worker exists from here on: give it its keys at once rather than after the Tail
+      // Worker, so it serves as little as possible without them.
+      await installationKeys();
+    }
     await wrangler('tail-worker', 'deploy', '--env', c.environment);
     if (existsSync(join(root, '.wrangler/tail-worker-first-deploy'))) await sync();
     if (firstDeploy) await deployApi();
   });
-  // Installation keys go straight into the API Worker and are never read back. Only a fresh
-  // installer installation may create them; adoptions and CI deploys must already have them.
-  await phase('installation-keys', () =>
-    ensureInstallationKeys({
-      mayCreate: !c.adoption && c.profile !== 'legacy-ci',
-      worker: { ...cloudflareAccess, worker: apiWorker },
-      databaseId: output('d1DatabaseId'),
-    })
-  );
+  await phase('installation-keys', installationKeys);
   await phase('publish-application', async () => {
     await wrangler(
       'web',

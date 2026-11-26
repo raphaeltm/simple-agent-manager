@@ -88,13 +88,20 @@ describe('the Pulumi program holds no installation key', () => {
 
   it('generates no private key other than the legacy Origin CA key', () => {
     // The Origin CA key, CSR and certificate are retired by a separate approved change (decision
-    // D3 in tasks/active/2026-11-26-installation-keys-out-of-pulumi-and-ci.md).
+    // D3, tasks/backlog/2026-11-26-retire-origin-ca-key.md).
     const keys = programSources().flatMap(({ file, text }) =>
       [...text.matchAll(/new\s+tls\.PrivateKey\(\s*['"`]([^'"`]+)['"`]/g)].map(
         (match) => `${file.slice(INFRA.length + 1)} ${match[1]}`
       )
     );
     expect(keys).toEqual(['resources/origin-ca.ts origin-ca-key']);
+  });
+
+  it('exports nothing named like a key, secret, token or PEM from the stack', async () => {
+    const stack = await import('../index');
+    const keyLike = Object.keys(stack).filter((name) => /key|secret|token|pem|password/i.test(name));
+    // The legacy Origin CA pair is retired by decision D3 (tasks/backlog/2026-11-26-retire-origin-ca-key.md).
+    expect(keyLike.sort()).toEqual(['originCaCertPem', 'originCaKeyPem']);
   });
 
   it('exports no installation key from the stack', () => {

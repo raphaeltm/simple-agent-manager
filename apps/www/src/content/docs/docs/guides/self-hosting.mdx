@@ -847,7 +847,7 @@ There's no rollback. If a release misbehaves, update to a newer one that fixes i
 3. Choose the `main` branch and leave `target_commit_sha` empty (it defaults to the current `main` tip). Optionally paste the current `main` tip's exact 40-character SHA. Historical commits are rejected. Leave `dry_run` disabled.
 4. Wait for the workflow to finish, then re-run the health check above.
 
-Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+Use the manual workflow when you change GitHub Environment variables or deployment credentials, or want to re-apply Pulumi-managed infrastructure. Deploys never change installation keys.
 
 ### Deploys wait for container rollout
 

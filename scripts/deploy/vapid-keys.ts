@@ -1,5 +1,4 @@
 import * as crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 const P256_PRIVATE_KEY_BYTES = 32;
 const P256_PUBLIC_KEY_BYTES = 65;
@@ -55,28 +54,4 @@ export function deriveVapidKeyPairFromPem(privateKeyPem: string): VapidRawKeyPai
     throw new Error('VAPID derived public key does not match the private key');
   }
   return pair;
-}
-
-function main(): void {
-  const command = process.argv[2];
-  if (command === 'derive-public-from-raw') {
-    process.stdout.write(deriveVapidPublicKey(process.env.VAPID_PRIVATE_KEY_INPUT ?? ''));
-    return;
-  }
-  const pair = deriveVapidKeyPairFromPem(process.env.VAPID_PRIVATE_KEY_PEM_INPUT ?? '');
-  if (command === 'derive-public-from-pem') {
-    process.stdout.write(pair.publicKey);
-    return;
-  }
-  if (command === 'derive-private-from-pem') {
-    process.stdout.write(pair.privateKey);
-    return;
-  }
-  throw new Error(
-    'Usage: vapid-keys.ts derive-public-from-raw|derive-public-from-pem|derive-private-from-pem'
-  );
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
 }

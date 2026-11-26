@@ -297,8 +297,8 @@ export interface CloudflareWorker {
 //
 // These are required Cloudflare Worker secrets after deployment configuration
 // runs. Do not treat this list as the manual GitHub Environment prerequisite
-// list: several platform-owned secrets are generated and persisted in Pulumi
-// state, then copied to Worker secrets by scripts/deploy/configure-secrets.sh.
+// list: the installation keys are created once, straight into the API Worker
+// (scripts/deploy/installation-keys.ts); configure-secrets.sh only checks them.
 // GitHub App/OAuth values are optional compatibility fallbacks because runtime
 // platform config can now provide them after first-run setup.
 

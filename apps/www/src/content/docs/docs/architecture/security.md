@@ -44,8 +44,8 @@ These Cloudflare Worker secrets are generated or copied during deployment and ar
 | `CREDENTIAL_ENCRYPTION_KEY`  | Optional override for user credential encryption (falls back to `ENCRYPTION_KEY`)                                                                 |
 | `JWT_PRIVATE_KEY`            | RSA-2048 key for signing workspace and callback tokens                                                                                            |
 | `JWT_PUBLIC_KEY`             | RSA-2048 key for token verification (exposed via JWKS)                                                                                            |
-| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 key for signing deployment apply payloads (auto-generated)                                                                                |
-| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                                                                             |
+| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 key for signing deployment apply payloads (installation key)                                                                                |
+| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (installation key)                                                                             |
 | `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit) |
 | `CF_ACCOUNT_ID`              | Cloudflare account identifier used by account-scoped Cloudflare APIs                                                                              |
 | `CF_ZONE_ID`                 | Cloudflare zone identifier used for DNS and Origin CA operations                                                                                  |

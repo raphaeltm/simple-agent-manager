@@ -1723,7 +1723,11 @@ describe('installation engine: adopting an existing deployment', () => {
       expect(refresh).toBeLessThan(recheck);
       expect(recheck).toBeLessThan(firstState);
       expect(stateCommands(calls).length).toBe(keyUrns.length * 2);
-      expect(calls.findLastIndex((line) => line.startsWith('pulumi state'))).toBe(up - 1);
+      const lastState =
+        calls.length -
+        1 -
+        [...calls].reverse().findIndex((line) => line.startsWith('pulumi state'));
+      expect(lastState).toBe(up - 1);
       // Exactly the allowlisted resources, each unprotected then deleted.
       for (const urn of keyUrns) {
         expect(calls).toContain(`pulumi state unprotect ${urn} --yes`);
@@ -1800,7 +1804,8 @@ it('caps each takeover refusal line, whatever the deployment names its resources
 describe('installation engine: installation keys', () => {
   async function install(
     f: ReturnType<typeof fixture>,
-    input: InstallerEngineConfig = config,
+    // The engine validates its input itself (validateEngineConfig), as other tests rely on.
+    input: unknown = config,
     environment: NodeJS.ProcessEnv = privateEnv
   ) {
     const events: EngineEvent[] = [];
@@ -1853,13 +1858,36 @@ describe('installation engine: installation keys', () => {
     expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
   });
 
-  it('refuses to create keys when the Worker has some but not all, and writes nothing', async () => {
+  it('an installation from before a key group existed gets that group, and keeps the rest', async () => {
     const f = fixture();
-    f.workerSecrets.set('ENCRYPTION_KEY', 'existing');
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (!name.startsWith('VAPID_')) f.workerSecrets.set(name, 'existing');
     const { error } = await install(f);
-    expect(error?.message).toContain('installation-keys failed');
-    expect(f.keyWrites).toEqual([]);
+    expect(error).toBeUndefined();
+    expect(f.keyWrites).toHaveLength(1);
+    expect(Object.keys(JSON.parse(f.keyWrites[0]).secrets).sort()).toEqual([
+      'VAPID_PRIVATE_KEY',
+      'VAPID_PUBLIC_KEY',
+    ]);
     expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
+  });
+
+  it('refuses to complete a key pair the Worker holds only half of, and writes nothing', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (name !== 'JWT_PUBLIC_KEY') f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
+  });
+
+  it('never creates ENCRYPTION_KEY for an installation that has other keys', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (name !== 'ENCRYPTION_KEY') f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
   });
 
   it('refuses to create keys when the database already has users', async () => {
@@ -1870,7 +1898,7 @@ describe('installation engine: installation keys', () => {
         ? Response.json({ success: true, result: [{ results: [{ present: 1 }] }] })
         : original(url, init);
     const { error } = await install(f);
-    expect(error?.message).toContain('installation-keys failed');
+    expect(error?.message).toContain('failed');
     expect(f.keyWrites).toEqual([]);
   });
 
@@ -1884,7 +1912,7 @@ describe('installation engine: installation keys', () => {
         CF_RUNTIME_API_TOKEN: undefined,
       }
     );
-    expect(error?.message).toContain('installation-keys failed');
+    expect(error?.message).toContain('failed');
     expect(f.keyWrites).toEqual([]);
     expect(f.workerSecrets.size).toBe(0);
     expect(

@@ -41,13 +41,13 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `GH_APP_SLUG`                                      | Yes                                                                |
 | Secret   | `GH_WEBHOOK_SECRET`                                | Yes when GitHub App webhooks are active                            |
 | Secret   | `AGENT_SIGN_IN_TRUST`                              | No (test instances only: JSON trust config for agent sign-in through workload identity; unset => off and the Worker secret is deleted on deploy; see `apps/www/src/content/docs/docs/guides/agent-sign-in.md`) |
-| Secret   | `ENCRYPTION_KEY`                                   | No (auto-generated)                                                |
-| Secret   | `JWT_PRIVATE_KEY`                                  | No (auto-generated)                                                |
-| Secret   | `JWT_PUBLIC_KEY`                                   | No (auto-generated)                                                |
-| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY`                       | No (auto-generated; override only)                                 |
-| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`                        | No (derived during deploy; override only)                          |
-| Secret   | `VAPID_PRIVATE_KEY`                                | No (auto-generated; override only)                                 |
-| Secret   | `VAPID_PUBLIC_KEY`                                 | No (derived during deploy; override only)                          |
+| Secret   | `ENCRYPTION_KEY`                                   | No (installation key: API Worker only)                                                |
+| Secret   | `JWT_PRIVATE_KEY`                                  | No (installation key: API Worker only)                                                |
+| Secret   | `JWT_PUBLIC_KEY`                                   | No (installation key: API Worker only)                                                |
+| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY`                       | No (installation key: API Worker only)                                 |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`                        | No (installation key: API Worker only)                          |
+| Secret   | `VAPID_PRIVATE_KEY`                                | No (installation key: API Worker only)                                 |
+| Secret   | `VAPID_PUBLIC_KEY`                                 | No (installation key: API Worker only)                          |
 | Secret   | `VAPID_SUBJECT`                                    | No (generated contact URI; override only)                          |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
@@ -505,7 +505,7 @@ by the read-only cron-liveness check.
 - `HUMAN_INPUT_ESCALATION_FRACTIONS` — Comma-separated reminder points within the initial window (default: `0.25,0.75`)
 - `HUMAN_INPUT_UNDELIVERED_GRACE_MS` — Extension when no push delivery was confirmed (default: `7200000`)
 - `HUMAN_INPUT_MAX_WAIT_MS` — Hard maximum needs-input marker lifetime (default: `86400000`)
-- `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` — Deployment-generated Worker secrets for Web Push authentication and browser subscription
+- `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY` — installation keys (created once into the API Worker) for Web Push; `VAPID_SUBJECT` is derived from `BASE_DOMAIN` by each deploy
 - `WEB_PUSH_TTL_SECONDS` — Push-service message TTL (default: `86400`)
 - `WEB_PUSH_VAPID_TTL_SECONDS` — VAPID authorization-token lifetime (default: `43200`)
 - `WEB_PUSH_DELIVERY_TIMEOUT_MS` — Per-attempt delivery timeout (default: `10000`)

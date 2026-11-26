@@ -44,7 +44,9 @@ export function generateVapidKeyPair(): { publicKey: string; privateKey: string 
 
 async function main(): Promise<void> {
   console.log('🔑 Generating security keys for local development\n');
-  console.log('NOTE: For production, keys are managed by Pulumi and persist automatically.\n');
+  console.log(
+    'NOTE: local development only. A deployed installation creates its keys once, straight into its API Worker.\n'
+  );
 
   const encryptionKey = generateEncryptionKey();
   const { publicKey, privateKey } = generateKeyPair();

@@ -11,9 +11,9 @@
  */
 import {
   createInstallationKeys,
-  inspectInstallationKeys,
   requireInstallationKeys,
   type WorkerAccess,
+  workerSecretNames,
 } from './installation-keys.js';
 import { refuseResourceChanges } from './installer-engine-adoption.js';
 import { previewExcludeArgs, retireKeyResources } from './retire-key-resources.js';
@@ -46,7 +46,7 @@ export async function applyInfrastructure(steps: InfrastructureSteps): Promise<v
     );
   await retireKeyResources({
     urns,
-    requireKeys: () => requireInstallationKeys(steps.worker),
+    workerSecretNames: () => workerSecretNames(steps.worker),
     pulumi: async (args) => {
       await steps.pulumiQuiet(args);
     },
@@ -55,17 +55,20 @@ export async function applyInfrastructure(steps: InfrastructureSteps): Promise<v
 }
 
 /**
- * A fresh installer installation (not an adoption, not a CI deploy) creates its keys when its
- * Worker has none and its database has no users; any other run requires them all to be present.
+ * Installer runs (not CI) create the keys the Worker lacks: every key for a brand-new installation,
+ * or a whole group an older installation never had. Never ENCRYPTION_KEY for an adoption or an
+ * existing installation, never a replacement. CI deploys only require them, by name.
  */
 export async function ensureInstallationKeys(options: {
   mayCreate: boolean;
+  freshInstallation: boolean;
   worker: WorkerAccess;
   databaseId: string;
 }): Promise<void> {
-  if (options.mayCreate && (await inspectInstallationKeys(options.worker)).state === 'absent') {
-    await createInstallationKeys({ ...options.worker, databaseId: options.databaseId });
-    return;
-  }
+  if (options.mayCreate)
+    await createInstallationKeys(
+      { ...options.worker, databaseId: options.databaseId },
+      { freshInstallation: options.freshInstallation }
+    );
   await requireInstallationKeys(options.worker);
 }

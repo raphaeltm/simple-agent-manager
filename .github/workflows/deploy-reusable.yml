@@ -482,7 +482,10 @@ jobs:
         # deletion would fail the preview, and a deleted RandomId's diff prints its raw id (the key).
         run: |
           EXCLUDE_ARGS="$(cd .. && pnpm exec tsx scripts/deploy/retire-key-resources.ts exclude-args)"
-          mapfile -t EXCLUDE <<<"$EXCLUDE_ARGS"
+          EXCLUDE=()
+          if [ -n "$EXCLUDE_ARGS" ]; then
+            mapfile -t EXCLUDE <<<"$EXCLUDE_ARGS"
+          fi
           pulumi preview "${EXCLUDE[@]}"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1983,7 +1986,7 @@ jobs:
 
       # A secondary installation shares this environment's account-level credentials but not
       # its identity: OAuth/App callbacks, signing, encryption and analytics overrides belong to
-      # the primary installation, so they are not passed and Pulumi generates the keys. Its agent
+      # the primary installation, so they are not passed. Its agent
       # sign-in trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2), passed straight to
       # configure-secrets.sh as SECONDARY_AGENT_SIGN_IN_TRUST and written in the same bulk secret
       # deployment; unset, the Worker value is left as it is. A new secondary installation needs

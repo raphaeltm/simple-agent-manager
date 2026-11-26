@@ -29,20 +29,30 @@ import { isEntrypoint } from './entrypoint.js';
 import {
   DEFAULT_CLOUDFLARE_API_BASE,
   InstallationKeysError,
-  requireInstallationKeys,
+  workerSecretNames,
 } from './installation-keys.js';
 
 const RANDOM_ID = 'random:index/randomId:RandomId';
 const PRIVATE_KEY = 'tls:index/privateKey:PrivateKey';
 
-/** The resources that held installation keys, by Pulumi type and name. */
-export const RETIRED_KEY_RESOURCES: ReadonlyArray<readonly [type: string, name: string]> = [
-  [RANDOM_ID, 'encryption-key'],
-  [RANDOM_ID, 'deploy-signing-private-key'],
-  [RANDOM_ID, 'preview-signing-key'],
-  [RANDOM_ID, 'trial-claim-token-secret'],
-  [PRIVATE_KEY, 'jwt-signing-key'],
-  [PRIVATE_KEY, 'vapid-key'],
+/**
+ * The resources that held installation keys, by Pulumi type and name, with the Worker secrets each
+ * one was copied into. Before a resource leaves state, the Worker must hold those secrets: state is
+ * then no longer the only copy. The retired trial secret was never a Worker secret any more.
+ */
+export const RETIRED_KEY_RESOURCES: ReadonlyArray<
+  readonly [type: string, name: string, workerSecrets: readonly string[]]
+> = [
+  [RANDOM_ID, 'encryption-key', ['ENCRYPTION_KEY']],
+  [
+    RANDOM_ID,
+    'deploy-signing-private-key',
+    ['DEPLOY_SIGNING_PRIVATE_KEY', 'DEPLOY_SIGNING_PUBLIC_KEY'],
+  ],
+  [RANDOM_ID, 'preview-signing-key', ['PREVIEW_SIGNING_KEY']],
+  [RANDOM_ID, 'trial-claim-token-secret', []],
+  [PRIVATE_KEY, 'jwt-signing-key', ['JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY']],
+  [PRIVATE_KEY, 'vapid-key', ['VAPID_PRIVATE_KEY', 'VAPID_PUBLIC_KEY']],
 ];
 
 /** Declared by the program from this change on (infra/resources/secrets.ts). */
@@ -53,7 +63,7 @@ export const RETIREMENT_MARKER: readonly [type: string, name: string] = [
 
 const STACK_TYPE = 'pulumi:pulumi:Stack';
 
-function isResource(urn: string, [type, name]: readonly [string, string]): boolean {
+function isResource(urn: string, [type, name]: readonly [string, string, ...unknown[]]): boolean {
   return urn.endsWith(`::${type}::${name}`);
 }
 
@@ -77,8 +87,8 @@ export function previewExcludeArgs(urns: readonly string[]): string[] {
 
 export interface RetireOptions {
   urns: readonly string[];
-  /** Fails unless the API Worker holds every installation key (names only). */
-  requireKeys(): Promise<void>;
+  /** The API Worker's secret names (never values). */
+  workerSecretNames(): Promise<ReadonlySet<string>>;
   /** Runs `pulumi <args>` in the project directory; output is never shown. */
   pulumi(args: string[]): Promise<void>;
 }
@@ -87,8 +97,17 @@ export interface RetireOptions {
 export async function retireKeyResources(options: RetireOptions): Promise<string[]> {
   const present = presentKeyResources(options.urns);
   if (present.length === 0) return [];
-  // State is the only other copy of these keys: never remove it unless the Worker has them all.
-  await options.requireKeys();
+  // State may be the only other copy of a key: never remove a resource whose Worker secrets are
+  // not all there. A group the Worker lacks and state never had is not this step's business.
+  const names = await options.workerSecretNames();
+  const missing = RETIRED_KEY_RESOURCES.filter((resource) =>
+    present.some((urn) => isResource(urn, resource))
+  ).flatMap(([, , secrets]) => secrets.filter((secret) => !names.has(secret)));
+  if (missing.length)
+    throw new InstallationKeysError(
+      `Pulumi state still holds keys the API Worker does not have (${missing.join(', ')}), so ` +
+        'nothing was removed from state. Do not create new keys for them: ask the installation owner.'
+    );
   for (const urn of present) {
     await options.pulumi(['state', 'unprotect', urn, '--yes']);
     await options.pulumi(['state', 'delete', urn, '--yes']);
@@ -118,8 +137,8 @@ async function main(): Promise<void> {
     throw new InstallationKeysError('Usage: retire-key-resources.ts exclude-args|retire');
   const retired = await retireKeyResources({
     urns,
-    requireKeys: () =>
-      requireInstallationKeys({
+    workerSecretNames: () =>
+      workerSecretNames({
         request: (url, init) => fetch(url, init),
         apiBase: process.env.CLOUDFLARE_API_BASE_URL || DEFAULT_CLOUDFLARE_API_BASE,
         accountId: process.env.CF_ACCOUNT_ID ?? '',

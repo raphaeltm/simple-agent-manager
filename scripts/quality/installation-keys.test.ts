@@ -7,7 +7,7 @@ import { deriveDeploySigningPublicKey } from '../deploy/deploy-signing-keys';
 import {
   createInstallationKeys,
   inspectSecretListing,
-  REAL_USER_EXISTS_SQL,
+  INSTALLATION_DATA_EXISTS_SQL,
   INSTALLATION_KEY_GROUPS,
   INSTALLATION_KEY_NAMES,
   InstallationKeysError,
@@ -22,7 +22,9 @@ import {
 } from '../deploy/retire-key-resources';
 
 /** A Worker as Cloudflare holds it: secrets by name, a database that may have users. */
-function cloudflare(init: { names?: string[]; users?: number; failWrite?: boolean } = {}) {
+function cloudflare(
+  init: { names?: string[]; users?: number; credentials?: boolean; failWrite?: boolean } = {}
+) {
   const secrets = new Map((init.names ?? []).map((name) => [name, 'existing'] as const));
   const writes: string[] = [];
   const requests: string[] = [];
@@ -44,6 +46,9 @@ function cloudflare(init: { names?: string[]; users?: number; failWrite?: boolea
         // holds migration 0043's system sentinel row.
         const db = new DatabaseSync(':memory:');
         db.exec('CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, status TEXT)');
+        db.exec('CREATE TABLE credentials (id TEXT PRIMARY KEY)');
+        db.exec('CREATE TABLE platform_credentials (id TEXT PRIMARY KEY)');
+        if (init.credentials) db.exec("INSERT INTO platform_credentials VALUES ('pc1')");
         db.exec(
           "INSERT INTO users VALUES ('system_anonymous_trials', 'system@sam.invalid', 'system')"
         );
@@ -112,46 +117,82 @@ describe('installation keys', () => {
     expect(() => inspectSecretListing({ result: [] })).toThrow(InstallationKeysError);
   });
 
-  it('creates every key in one write for a brand-new installation and returns nothing', async () => {
+  const fresh = { freshInstallation: true };
+
+  it('creates every key in one write for a brand-new installation and returns only names', async () => {
     const world = cloudflare();
-    await expect(createInstallationKeys(world.access)).resolves.toBeUndefined();
+    const created = await createInstallationKeys(world.access, fresh);
+    expect([...created].sort()).toEqual([...INSTALLATION_KEY_NAMES].sort());
     expect(world.writes).toHaveLength(1);
     expect([...world.secrets.keys()].sort()).toEqual([...INSTALLATION_KEY_NAMES].sort());
     await expect(requireInstallationKeys(world.access)).resolves.toBeUndefined();
   });
 
-  it.each([
-    ['already has every key', { names: [...INSTALLATION_KEY_NAMES] }, 'never replaced'],
-    ['has some keys', { names: ['ENCRYPTION_KEY'] }, 'refusing to create keys'],
-    ['has users in its database', { users: 1 }, 'already has users'],
-  ])(
-    'refuses to create keys when the installation %s, and writes nothing',
-    async (_l, init, message) => {
-      const world = cloudflare(init);
-      await expect(createInstallationKeys(world.access)).rejects.toThrow(message);
-      expect(world.writes).toEqual([]);
-      expect(world.secrets.get('ENCRYPTION_KEY')).toBe(
-        init.names?.includes('ENCRYPTION_KEY') ? 'existing' : undefined
-      );
-    }
-  );
-
-  it('a fresh database holding only the system sentinel row counts as having no users', async () => {
+  it('a fresh database holding only the system sentinel row counts as empty', async () => {
     const world = cloudflare();
-    await expect(createInstallationKeys(world.access)).resolves.toBeUndefined();
-    expect(world.writes).toHaveLength(1);
-    expect(REAL_USER_EXISTS_SQL).toContain("status IS NOT 'system'");
+    await expect(createInstallationKeys(world.access, fresh)).resolves.toHaveLength(
+      INSTALLATION_KEY_NAMES.length
+    );
+    expect(INSTALLATION_DATA_EXISTS_SQL).toContain("status IS NOT 'system'");
   });
 
-  it('a failed write reports only its status, never the request or response body', async () => {
+  it('writes nothing for an installation that has every key', async () => {
+    const world = cloudflare({ names: [...INSTALLATION_KEY_NAMES] });
+    await expect(createInstallationKeys(world.access, fresh)).resolves.toEqual([]);
+    expect(world.writes).toEqual([]);
+  });
+
+  it('fills a whole group an older installation never had, never touching the others', async () => {
+    const names = INSTALLATION_KEY_NAMES.filter((name) => name !== 'PREVIEW_SIGNING_KEY');
+    // Users and credentials exist: only ENCRYPTION_KEY depends on the database being empty.
+    const world = cloudflare({ names, users: 2, credentials: true });
+    await expect(createInstallationKeys(world.access)).resolves.toEqual(['PREVIEW_SIGNING_KEY']);
+    expect(world.secrets.get('ENCRYPTION_KEY')).toBe('existing');
+  });
+
+  it.each([
+    [
+      'holds half of a key pair',
+      { names: ['ENCRYPTION_KEY', 'JWT_PRIVATE_KEY'] },
+      fresh,
+      'part of a key pair',
+    ],
+    [
+      'lacks only ENCRYPTION_KEY',
+      { names: INSTALLATION_KEY_NAMES.filter((n) => n !== 'ENCRYPTION_KEY') },
+      fresh,
+      'never created for an existing installation',
+    ],
+    [
+      'has no keys but is not a new installation',
+      {},
+      {},
+      'never created for an existing installation',
+    ],
+    ['has no keys but real users', { users: 1 }, fresh, 'already has users or credentials'],
+    [
+      'has no keys but stored credentials',
+      { credentials: true },
+      fresh,
+      'already has users or credentials',
+    ],
+  ])('refuses when the installation %s, and writes nothing', async (_l, init, options, message) => {
+    const world = cloudflare(init);
+    await expect(createInstallationKeys(world.access, options)).rejects.toThrow(message);
+    expect(world.writes).toEqual([]);
+  });
+
+  it('a failed write reports only its status and error code, never a body', async () => {
     const world = cloudflare({ failWrite: true });
-    const error = await createInstallationKeys(world.access).catch((caught: unknown) => caught);
+    const error = await createInstallationKeys(world.access, fresh).catch(
+      (caught: unknown) => caught
+    );
     expect(error).toBeInstanceOf(InstallationKeysError);
     const written = JSON.parse(world.writes[0]) as { secrets: Record<string, { text: string }> };
     for (const { text } of Object.values(written.secrets))
       for (const line of text.split('\n').filter((part) => part.length > 16))
         expect(String((error as Error).message)).not.toContain(line);
-    expect((error as Error).message).toBe('Cloudflare API workers returned 400');
+    expect((error as Error).message).toBe('Cloudflare API workers returned 400 (error 10215)');
   });
 
   it('names the missing keys, and never creates one, when a deploy requires them', async () => {
@@ -187,12 +228,15 @@ describe('retiring key resources from Pulumi state', () => {
     expect(previewExcludeArgs([])).toEqual([]);
   });
 
-  it('checks the Worker holds every key before touching state, then unprotects and deletes', async () => {
+  const allNames = async () => new Set<string>(INSTALLATION_KEY_NAMES);
+
+  it('checks the Worker holds the keys of each resource before touching state, then unprotects and deletes', async () => {
     const calls: string[] = [];
     const retired = await retireKeyResources({
       urns: [stack, ...keys, identity],
-      requireKeys: async () => {
+      workerSecretNames: async () => {
         calls.push('require');
+        return allNames();
       },
       pulumi: async (args) => {
         calls.push(args.join(' '));
@@ -205,28 +249,46 @@ describe('retiring key resources from Pulumi state', () => {
     );
   });
 
-  it('leaves state untouched when the Worker is missing a key', async () => {
+  it('leaves state untouched when the Worker lacks a key that state still holds', async () => {
     const calls: string[] = [];
     await expect(
       retireKeyResources({
         urns: [stack, ...keys],
-        requireKeys: async () => {
-          throw new InstallationKeysError('missing installation keys: ENCRYPTION_KEY');
-        },
+        workerSecretNames: async () =>
+          new Set(INSTALLATION_KEY_NAMES.filter((name) => name !== 'VAPID_PUBLIC_KEY')),
         pulumi: async (args) => {
           calls.push(args.join(' '));
         },
       })
-    ).rejects.toThrow('missing installation keys');
+    ).rejects.toThrow('does not have (VAPID_PUBLIC_KEY)');
     expect(calls).toEqual([]);
+  });
+
+  it('retires a resource whose keys are on the Worker even if another group is absent from both', async () => {
+    const calls: string[] = [];
+    const encryption = keys.find((urn) => urn.endsWith('::encryption-key'))!;
+    await retireKeyResources({
+      urns: [stack, encryption],
+      // An older installation that never had VAPID keys anywhere.
+      workerSecretNames: async () =>
+        new Set(INSTALLATION_KEY_NAMES.filter((name) => !name.startsWith('VAPID_'))),
+      pulumi: async (args) => {
+        calls.push(args.join(' '));
+      },
+    });
+    expect(calls).toEqual([
+      `state unprotect ${encryption} --yes`,
+      `state delete ${encryption} --yes`,
+    ]);
   });
 
   it('is a no-op on a stack already migrated, without even checking the Worker', async () => {
     let checked = false;
     const retired = await retireKeyResources({
       urns: [stack, identity],
-      requireKeys: async () => {
+      workerSecretNames: async () => {
         checked = true;
+        return allNames();
       },
       pulumi: async () => {
         throw new Error('no state command expected');
