@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  ALLOWED_LEGACY_READS,
   isScannedPath,
   type RuleId,
   RULES,
@@ -476,16 +477,14 @@ describe('scanRepository', () => {
     ]);
   });
 
-  it('accepts a marked read only while its task file is open in the repository', () => {
+  it('accepts no marked read in the repository now the allowlist is empty, open task or not', () => {
     const files = {
       'scripts/deploy/configure-secrets.sh': `# sam:secret-readback-allowed ${OPEN_TASK}\npulumi stack output k --show-secrets\n`,
     };
     const withTask = scanRepository(repo({ ...files, [OPEN_TASK]: '# task\n' }));
-    expect(withTask.findings).toEqual([]);
-    expect(withTask.allowed).toHaveLength(1);
-    const withoutTask = scanRepository(repo(files));
-    expect(withoutTask.findings).toHaveLength(1);
-    expect(withoutTask.invalidMarkers).toHaveLength(1);
+    expect(withTask.findings).toHaveLength(1);
+    expect(withTask.allowed).toEqual([]);
+    expect(withTask.invalidMarkers).toHaveLength(1);
   });
 
   it('does not let an open task excuse a read in a file it is not pinned to', () => {
@@ -515,14 +514,13 @@ describe('scanRepository', () => {
     ]);
   });
 
-  it('passes on this repository with only the tracked configure-secrets read', () => {
+  it('passes on this repository with no secret readback left at all', () => {
     const result = scanRepository(join(import.meta.dirname, '..', '..'));
     expect(result.findings).toEqual([]);
     expect(result.invalidMarkers).toEqual([]);
     expect(result.files).toBeGreaterThan(100);
-    expect(result.allowed.map((read) => `${read.file} ${read.rule} ${read.task}`)).toEqual([
-      `scripts/deploy/configure-secrets.sh show-secrets ${OPEN_TASK}`,
-    ]);
+    expect(result.allowed).toEqual([]);
+    expect(ALLOWED_LEGACY_READS).toEqual([]);
   });
 
   it('skips test files and itself', () => {

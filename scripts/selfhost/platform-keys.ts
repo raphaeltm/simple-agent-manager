@@ -1,8 +1,8 @@
 /**
  * Platform keys for a celld box, generated once and then reused.
  *
- * On Cloudflare, Pulumi generates and persists these (`infra/resources/secrets.ts`). A
- * self-hosted box has no Pulumi state, so the deploy script generates the same shapes with
+ * On Cloudflare, the same groups are created once into the API Worker
+ * (`scripts/deploy/installation-keys.ts`). A self-hosted box generates the same shapes with
  * the local-dev generators in `scripts/deploy/generate-keys.ts` and keeps them in a
  * root-only file (`<state-dir>/platform-keys.json`). They are never regenerated: a new
  * ENCRYPTION_KEY would make every stored credential undecryptable, and a new SAM_INSTALLATION_ID

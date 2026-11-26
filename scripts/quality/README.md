@@ -268,8 +268,8 @@ A legacy line that cannot go yet is accepted only when all of these hold:
 - the task is still open, under `tasks/backlog/` or `tasks/active/`.
 
 A marker that fails any of these makes the line a finding, and the marker itself is reported.
-Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets.sh`, tracked by
-`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
+The list lives in `scripts/quality/secret-readback-allowlist.json`. Since 2026-11-26 it is empty: `scripts/deploy/configure-secrets.sh` no longer reads
+installation keys back from Pulumi (they live only in the API Worker, `scripts/deploy/installation-keys.ts`).
 Every value that read returns is masked before any other use.
 
 It runs in the Secret Scan job, which has no path filter, so every pull request and every

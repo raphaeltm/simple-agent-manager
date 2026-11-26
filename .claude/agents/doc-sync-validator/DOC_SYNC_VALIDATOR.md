@@ -169,9 +169,9 @@ grep -rn "apps/\|packages/\|scripts/" apps/www/src/content/docs/docs CLAUDE.md A
 | `BASE_DOMAIN`          | Environment Variables | GitHub Environment | Yes                  |
 | `GITHUB_CLIENT_ID`     | Platform Secrets      | GitHub Environment | Yes                  |
 | `GITHUB_CLIENT_SECRET` | Platform Secrets      | GitHub Environment | Yes                  |
-| `ENCRYPTION_KEY`       | Platform Secrets      | GitHub Environment | Yes (auto-generated) |
-| `JWT_PRIVATE_KEY`      | Platform Secrets      | GitHub Environment | Yes (auto-generated) |
-| `JWT_PUBLIC_KEY`       | Platform Secrets      | GitHub Environment | Yes (auto-generated) |
+| `ENCRYPTION_KEY`       | Platform Secrets      | API Worker only    | Installation key     |
+| `JWT_PRIVATE_KEY`      | Platform Secrets      | API Worker only    | Installation key     |
+| `JWT_PUBLIC_KEY`       | Platform Secrets      | API Worker only    | Installation key     |
 | ...                    | ...                   | ...                | ...                  |
 
 ### API Endpoint Sync Matrix
@@ -261,7 +261,7 @@ Actual code
 ## Important Notes
 
 - Bindings (DATABASE, KV, R2) are Cloudflare bindings, not user-documented env vars
-- Some env vars are auto-generated (ENCRYPTION_KEY, JWT_*) - note this in docs
+- Installation keys (ENCRYPTION_KEY, JWT_*, signing and VAPID keys) are created once into the API Worker, never set in GitHub or Pulumi - note this in docs
 - Check both tables AND prose descriptions
 - Version numbers should match (constitution version, package.json, etc.)
 - Consider semantic meaning - minor wording differences may be acceptable

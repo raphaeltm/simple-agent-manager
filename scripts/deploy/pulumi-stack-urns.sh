@@ -21,14 +21,18 @@ urns="$(printf '%s\n' "$listing" | sed -n 's/^.*URN: \(urn:pulumi:[^[:space:]]*\
 # The header states how many resources the stack has. A listing whose URN count differs (or that
 # has no header) is a format this script does not understand: fail rather than report too few.
 expected="$(printf '%s\n' "$listing" | sed -n 's/^Current stack resources (\([0-9][0-9]*\)):.*$/\1/p' | head -n 1)"
+# A stack that has never been updated has no resource list at all.
+if [[ -z "$expected" ]] && printf '%s\n' "$listing" | grep -q 'No updates yet'; then
+  expected=0
+fi
 found=0
-if [ -n "$urns" ]; then
+if [[ -n "$urns" ]]; then
   found="$(printf '%s\n' "$urns" | wc -l | tr -d ' ')"
 fi
-if [ -z "$expected" ] || [ "$found" -ne "$expected" ]; then
+if [[ -z "$expected" || "$found" -ne "$expected" ]]; then
   echo "pulumi-stack-urns: could not read the resource list (stated: ${expected:-none}, URNs found: $found)" >&2
   exit 1
 fi
-if [ "$found" -gt 0 ]; then
+if [[ "$found" -gt 0 ]]; then
   printf '%s\n' "$urns"
 fi

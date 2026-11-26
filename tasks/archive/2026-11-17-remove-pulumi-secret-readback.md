@@ -1,5 +1,10 @@
 # Remove the Pulumi secret readback from configure-secrets.sh
 
+**Superseded and done** by `tasks/active/2026-11-26-installation-keys-out-of-pulumi-and-ci.md`
+(SAM task 01M8C74NYMDP2YYPAG17VXJB78): option 1 without any copy in Pulumi. Keys live only in the
+API Worker, deploys check names only, the readback and its allowlist entry are gone, and the key
+resources leave Pulumi state.
+
 Tracked by policy 795e72a6 (no secret readback in GitHub Actions) and
 `.claude/rules/83-no-secret-readback-in-ci.md`. Parent work: SAM task 01M7M4PMFV7ATSA5GJNXGKCXDT.
 
