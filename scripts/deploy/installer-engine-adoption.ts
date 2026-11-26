@@ -191,26 +191,54 @@ async function cloudflareResult(access: CloudflareAccess, path: string, init?: R
 export async function deployedWorkerOverrideVars(
   access: CloudflareAccess & { worker: string }
 ): Promise<Record<string, string>> {
+  const names = new Set(WORKER_VAR_OVERRIDE_NAMES.filter((name) => !ENGINE_OWNED_VARS.has(name)));
+  const vars: Record<string, string> = {};
+  for (const [name, text] of await deployedPlainTextVars(access)) {
+    if (names.has(name)) vars[name] = text;
+    const setting = Object.hasOwn(READABLE_SYNC_SETTINGS, name)
+      ? READABLE_SYNC_SETTINGS[name]
+      : undefined;
+    if (setting) vars[setting] = text;
+  }
+  return vars;
+}
+
+/** Every plain-text var the deployed API Worker runs with. Secrets are never readable here. */
+async function deployedPlainTextVars(
+  access: CloudflareAccess & { worker: string }
+): Promise<Array<[string, string]>> {
   const settings = await cloudflareResult(access, `workers/scripts/${access.worker}/settings`);
   if (!settings.found) throw new Error('Adopted API Worker not found');
   const bindings = (settings.result as { bindings?: unknown } | undefined)?.bindings;
   if (!Array.isArray(bindings)) throw new Error('Invalid Worker settings');
-  const names = new Set(WORKER_VAR_OVERRIDE_NAMES.filter((name) => !ENGINE_OWNED_VARS.has(name)));
-  const vars: Record<string, string> = {};
+  const vars: Array<[string, string]> = [];
   for (const binding of bindings as Array<{ type?: unknown; name?: unknown; text?: unknown }>) {
     if (
-      binding?.type !== 'plain_text' ||
-      typeof binding.name !== 'string' ||
-      typeof binding.text !== 'string'
+      binding?.type === 'plain_text' &&
+      typeof binding.name === 'string' &&
+      typeof binding.text === 'string'
     )
-      continue;
-    if (names.has(binding.name)) vars[binding.name] = binding.text;
-    const setting = Object.hasOwn(READABLE_SYNC_SETTINGS, binding.name)
-      ? READABLE_SYNC_SETTINGS[binding.name]
-      : undefined;
-    if (setting) vars[setting] = binding.text;
+      vars.push([binding.name, binding.text]);
   }
   return vars;
+}
+
+/**
+ * Takeover step 1b, before anything changes. `SETUP_FORCE=true` reopens the deployment's setup
+ * page so a locked-out owner can recover (`isSetupCompleted`, platform-config-core.ts). A
+ * takeover deploys without it, which would close setup under someone in the middle of a
+ * recovery; carrying it instead would leave an emergency switch on for good, with no GitHub
+ * variable left to turn it off. So the takeover refuses until the owner has finished and
+ * removed it.
+ */
+export async function refuseForcedSetup(
+  access: CloudflareAccess & { worker: string }
+): Promise<void> {
+  const vars = await deployedPlainTextVars(access);
+  if (vars.some(([name, text]) => name === 'SETUP_FORCE' && text === 'true'))
+    throw new AdoptionRefused([
+      'This SAM has forced setup switched on (SETUP_FORCE=true), which reopens its setup page for account recovery. A takeover would switch it off. Finish the recovery and remove SETUP_FORCE from the deployment, then take over.',
+    ]);
 }
 
 /**

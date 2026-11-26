@@ -335,3 +335,13 @@ deploy itself. The ones that change a deployment:
 - Because those are reset silently, the takeover panel and the guide now say so at the decision
   point. The real fix is for the owner to hand the service the fork's GitHub Environment variables
   (non-secret by definition): idea 01M8C88CXH9YTBZ4X3TDN1GP7J, to be decided by Raphaël.
+
+## Review fixes, round 10 (2026-11-26, Codex review of 8327c79ea)
+
+- SonarCloud failed its gate on b27ab319f for a sort without a compare function in the code added
+  in round 9; fixed in 8327c79ea together with two complexity findings (no behaviour change).
+- P2 "Preserve SETUP_FORCE during adoption": not carried, by decision. `SETUP_FORCE=true` reopens
+  the setup page for lockout recovery, the surface used in the 2026-11-12 setup takeover. Carrying
+  it would keep an emergency switch on for good; dropping it silently could close setup under
+  someone mid-recovery. The takeover now refuses in `adoption-preflight` while it is on
+  (`refuseForcedSetup`), before reading the database ledgers or running any Pulumi command.

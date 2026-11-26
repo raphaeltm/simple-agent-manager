@@ -1228,6 +1228,8 @@ describe('installation engine: adopting an existing deployment', () => {
     noObservabilityOutput?: boolean;
     /** The preview command exits non-zero, with this as the runner's failure tail. */
     previewFailureTail?: string[];
+    /** The deployed Worker's SETUP_FORCE var, when it has one. */
+    setupForce?: string;
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1288,6 +1290,9 @@ describe('installation engine: adopting an existing deployment', () => {
             result: {
               bindings: [
                 { type: 'plain_text', name: 'REQUIRE_APPROVAL', text: 'false' },
+                ...(world.setupForce === undefined
+                  ? []
+                  : [{ type: 'plain_text', name: 'SETUP_FORCE', text: world.setupForce }]),
                 // Sync settings outside the override list that the Worker still records.
                 { type: 'plain_text', name: 'PREVIEW_BASE_DOMAIN', text: 'previews.example.org' },
                 { type: 'plain_text', name: 'PREVIEW_URL_TTL_SECONDS', text: '600' },
@@ -1572,6 +1577,31 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('refuses a takeover while forced setup is switched on, before reading or changing anything else', async () => {
+    const f = adoptionFixture({ setupForce: 'true' });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM has forced setup switched on (SETUP_FORCE=true), which reopens its setup page for account recovery. A takeover would switch it off. Finish the recovery and remove SETUP_FORCE from the deployment, then take over.',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // Refused on the Worker's own settings, before the database ledgers are read.
+    expect(f.requests.some((line) => line.endsWith('/settings'))).toBe(true);
+    expect(f.requests.some((line) => line.endsWith('/query'))).toBe(false);
+  });
+
+  it('takes over a deployment whose forced setup is switched off, and never carries the switch', async () => {
+    const f = adoptionFixture({ setupForce: 'false' });
+    expect((await run(adopted, f)).error).toBeUndefined();
+    const syncs = f.commands.filter((entry) =>
+      entry.args.includes('scripts/deploy/sync-wrangler-config.ts')
+    );
+    expect(syncs.length).toBeGreaterThan(0);
+    for (const sync of syncs) expect(sync.env.SETUP_FORCE).toBeUndefined();
   });
 
   it('refuses a takeover when only the observability database is newer than the source', async () => {

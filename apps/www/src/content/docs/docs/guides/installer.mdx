@@ -166,6 +166,10 @@ through the service.
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 
+- **It stops before changing your deployment** while forced setup is switched on
+  (`SETUP_FORCE=true`, `refuseForcedSetup`). That switch reopens the setup page for account
+  recovery. A takeover would switch it off under you, and keeping it on would leave an emergency
+  switch on for good. Finish the recovery and remove it first.
 - **It stops before changing your deployment** when one of your SAM's two databases (the main one
   or the observability one) is newer than the approved source (it has migrations the source lacks,
   `refuseRollback`), because the older code could not run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This

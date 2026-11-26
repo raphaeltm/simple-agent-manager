@@ -6,6 +6,7 @@ import * as TOML from '@iarna/toml';
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
 import {
   keepAdoptedDeployment,
+  refuseForcedSetup,
   refuseResourceChanges,
   refuseRollback,
 } from './installer-engine-adoption.js';
@@ -327,13 +328,14 @@ export async function runInstallerEngine(
     token: String(env.CF_API_TOKEN),
   };
   if (c.adoption?.takeover)
-    await phase('adoption-preflight', () =>
-      refuseRollback({
+    await phase('adoption-preflight', async () => {
+      await refuseForcedSetup({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
+      await refuseRollback({
         ...cloudflareAccess,
         root,
         stackOutputs: () => pulumi('stack', 'output', '--json'),
-      })
-    );
+      });
+    });
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
   const cached = await openEngineBuildCache({
