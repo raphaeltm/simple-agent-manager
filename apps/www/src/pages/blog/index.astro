@@ -12,7 +12,6 @@ const byDate = (await getCollection('blog', ({ data }) => !data.draft))
 const builtAt = new Date();
 const pinned = byDate.filter((post) => isPinnedAt(post.data, builtAt));
 const posts = byDate.filter((post) => !isPinnedAt(post.data, builtAt));
-const isSecurity = isSecurityPost;
 ---
 
 <Base
@@ -30,11 +29,11 @@ const isSecurity = isSecurityPost;
       {pinned.map((post) => (
         <a
           href={`/blog/${post.id}/`}
-          class:list={['pinned-card', 'animate-on-scroll', { 'pinned-card--security': isSecurity(post.data.tags) }]}
+          class:list={['pinned-card', 'animate-on-scroll', { 'pinned-card--security': isSecurityPost(post.data.tags) }]}
         >
           <div class="pinned-label">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z" /><path class="mark" d="M8 6v3.5M8 11.6v.1" /></svg>
-            <span>{isSecurity(post.data.tags) ? 'Pinned · Security advisory' : 'Pinned'}</span>
+            <span>{isSecurityPost(post.data.tags) ? 'Pinned · Security advisory' : 'Pinned'}</span>
           </div>
           <div class="pinned-body">
             <div>
@@ -47,7 +46,7 @@ const isSecurity = isSecurityPost;
               <p class="pinned-excerpt">{post.data.excerpt}</p>
             </div>
             <span class="pinned-cta">
-              {isSecurity(post.data.tags) ? 'Read the advisory' : 'Read the post'} <span aria-hidden="true">→</span>
+              {isSecurityPost(post.data.tags) ? 'Read the advisory' : 'Read the post'} <span aria-hidden="true">→</span>
             </span>
           </div>
         </a>

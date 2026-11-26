@@ -48,6 +48,9 @@ test.describe('homepage', () => {
     if (!advisoryPinnedNow) {
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await expect(notice).toHaveCount(0);
+      // By class and by target too, so an edit to the notice copy cannot make this pass vacuously.
+      await expect(page.locator('.fh-notice')).toHaveCount(0);
+      await expect(page.locator(`.fh-hero a[href="${ADVISORY}"]`)).toHaveCount(0);
       return;
     }
     await expect(notice).toBeVisible();

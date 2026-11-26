@@ -8,9 +8,8 @@ import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures
  */
 
 test.describe('blog index', () => {
-  test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
-
   test('shows the pinned security advisory first, ahead of newer posts, while it is pinned', async ({ page }) => {
+    test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
     test.skip(!advisoryPinnedNow, 'the advisory pin has ended; covered by the next test');
     await page.goto('/blog/');
     const main = page.locator('main');
@@ -32,6 +31,7 @@ test.describe('blog index', () => {
   });
 
   test('lists the advisory in date order once its pin has ended', async ({ page }) => {
+    test.skip(nearPinBoundary, 'the build and this test may straddle the advisory pin end date');
     test.skip(advisoryPinnedNow, 'the advisory is still pinned; covered by the previous test');
     await page.goto('/blog/');
     const main = page.locator('main');
