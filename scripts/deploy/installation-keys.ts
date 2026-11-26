@@ -144,8 +144,8 @@ export function assertComplete(inspection: KeyInspection, worker: string): void 
   throw new InstallationKeysError(
     `API Worker ${worker} is missing installation keys: ${missing.join(', ')}. ` +
       'Deploys never create or replace keys. A brand-new installation gets them from the ' +
-      'installer, or from `pnpm exec tsx scripts/deploy/installation-keys.ts create` run on a ' +
-      'machine you own.'
+      'installer, or from `pnpm exec tsx scripts/deploy/installation-keys.ts create ' +
+      '--new-installation` run on a machine you own (see the self-hosting guide).'
   );
 }
 
@@ -249,15 +249,24 @@ async function readStdin(): Promise<string> {
   return text;
 }
 
+/**
+ * Parses `wrangler secret list --format json` output. Notices before the JSON may contain `[` (as
+ * in `[WARNING]`), so the listing starts at the first line that opens a JSON array. Throws on
+ * anything else; the caller fails closed.
+ */
+export function parseSecretListing(text: string): unknown {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => /^\s*\[\s*($|\{|\])/.test(line));
+  return JSON.parse(start < 0 ? text : lines.slice(start).join('\n'));
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === 'check-listing') {
     // `wrangler secret list --format json` on stdin: names and types only, never values.
     let listing: unknown;
     try {
-      // Tolerate a notice before the JSON; a wrong listing still fails closed.
-      const text = await readStdin();
-      listing = JSON.parse(text.slice(Math.max(0, text.indexOf('['))));
+      listing = parseSecretListing(await readStdin());
     } catch {
       throw new InstallationKeysError('Could not read the Worker secrets listing');
     }

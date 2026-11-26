@@ -152,7 +152,7 @@ step `retire-key-resources` that runs **before any Pulumi preview or `up`** of t
 
 No cloud resource is destroyed (random/tls resources exist only in state).
 
-**Takeover gate interaction**: the gate is not loosened. Because the retire step runs before
+**Takeover gate interaction** (#3018; superseded there by "retire last, after both gates"): the gate is not loosened. Because the retire step runs before
 `refuseResourceChanges()`, the preview never contains a delete for a key resource. Order on a
 takeover: `adoption-preflight` (rollback check) → `retire-key-resources` → preview gate → refresh →
 gate again → `up`. A stack that still had key resources is migrated by name, and anything else the
@@ -217,18 +217,18 @@ Update `CLAUDE.md` "Generated platform secrets" and Architecture Principle 3, `.
 ## Implementation checklist (Phase 2)
 
 - [x] First, separate PR: no `pulumi stack export` in CI + `state-export` guard (#3016, merged 6159fdf7b)
-- [x] Base on PR #3011's branch (merged in; rebase onto main after it merges)
+- [x] Base on PR #3011's branch (merged in; rebase onto main after it merges) — on #3018 only; #3019 is based on main
 - [x] `installation-keys.ts`: inspect (names only), create (no keys + no users, one secrets-bulk
       write, returns nothing), require, CLI (`check`, `check-listing`, `create` refusing CI);
       reuses the generators the self-hosted VM install uses (`generate-keys.ts`, `deploy-signing-keys.ts`)
-- [x] Engine phase `installation-keys` (create only for a fresh non-adoption installer install)
-- [x] `retire-key-resources.ts` + engine `applyInfrastructure`: gates `--exclude`, retire last before up
+- [x] Engine phase `installation-keys` (create only for a fresh non-adoption installer install) — on #3019 the adoption rule is absent (no adoption on main); it stays on #3018
+- [x] `retire-key-resources.ts` + engine `applyInfrastructure`: gates `--exclude`, retire last before up — on #3019 retire runs after refresh, last before up; the gates around it stay on #3018
 - [x] Workflow: retire step between Pulumi Refresh and Pulumi Up; dry-run preview excludes
 - [x] Remove key resources and outputs from `infra`; add the retirement marker
 - [x] `configure-secrets.sh`: no key handling; names-only check via `wrangler secret list`
 - [x] `deploy-reusable.yml`, `installer-engine-ci.ts`, `installer-engine-ci-env.json`: no key inputs
 - [x] `ALLOWED_LEGACY_READS` empty
-- [x] Tests (engine migration/takeover/refusal/missing key/fresh create canary; configure-secrets via
+- [x] Tests (engine migration/takeover (#3018)/refusal/missing key/fresh create canary; configure-secrets via
       real check; workflow guards; infra guards; unit tests)
 - [x] Docs/rules (section F)
 - [x] Supersede `tasks/archive/2026-11-17-remove-pulumi-secret-readback.md` (archived with a note)
@@ -252,5 +252,26 @@ _To be written once production, staging and staging2 are migrated and verified._
   VM callbacks verify, deploy-release signatures verify).
 - A deploy against a Worker missing a key fails and names the missing secret, without generating one.
 - A fresh installer install creates keys once, in the operator's account, never visible anywhere else.
-- Takeover of a stack that still has key resources succeeds through the explicit retire step; the
+- (#3018, not #3019) Takeover of a stack that still has key resources succeeds through the explicit retire step; the
   takeover gate itself is unchanged.
+
+## 2026-11-26 19:15Z: split onto main (coordinator decision)
+
+The staging and staging2 migrations (from #3018, stacked on #3011) left the protected
+`installation-keys-retired` marker in their state. Every main-based branch then failed at Pulumi Up
+there (runs 45876656051, 45881082560): main's program recreated the six key resources in state,
+with new values that no Worker received, and was refused the marker delete. Configure Worker
+Secrets never ran, so the live keys were untouched (checked 19:11Z: 8 names, 7/7 decrypt, JWKS
+fingerprints unchanged).
+
+Lesson: a migration that makes old programs fail closed must not run on a shared installation
+before it is on main. Migrate shared installations only through main, or on an installation no one
+else deploys to.
+
+Fix: this main-first PR carries the key change without #3011:
+infra (key resources out, marker in), names-only configure-secrets, the deploy-reusable retire step,
+`installation-keys.ts`, `retire-key-resources.ts`, and the engine's fresh-install key creation and
+retirement (`applyInfrastructure` without the takeover gates; `freshInstallation: true`, still
+refused when the database has users or stored credentials). #3018 keeps the takeover remainder
+(gates around retirement, adoption never creates keys, `PRESERVED_KEY_SECRETS`) and rebases on
+this.

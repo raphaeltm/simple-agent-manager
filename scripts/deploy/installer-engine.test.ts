@@ -1285,6 +1285,8 @@ describe('installation engine: adopting an existing deployment', () => {
     // The approved source's own defaults: CONNECTOR_ENABLED in [vars], VM_AGENT_TRANSPORT as a
     // recorded code default (worker-var-defaults.ts).
     writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
+    // State as Pulumi changes it: a targeted update adds the marker, `state delete` removes.
+    let urns = [...(world.urns ?? [])];
     const requests: string[] = [];
     const previewOptions: Array<{ privateOutput?: boolean }> = [];
     const ownerQueries: string[] = [];
@@ -1313,8 +1315,20 @@ describe('installation engine: adopting an existing deployment', () => {
         }
         if (command.args.some((arg) => arg.endsWith('scripts/deploy/pulumi-stack-urns.sh'))) {
           await f.runner.run(command, options);
-          return (world.urns ?? []).join('\n');
+          return urns.join('\n');
         }
+        if (
+          command.executable === 'pulumi' &&
+          command.args[0] === 'up' &&
+          command.args[1] === '--target'
+        )
+          urns.push(command.args[2]!);
+        if (
+          command.executable === 'pulumi' &&
+          command.args[0] === 'state' &&
+          command.args[1] === 'delete'
+        )
+          urns = urns.filter((urn) => urn !== command.args[2]);
         if (command.executable === 'pulumi' && command.args[0] === 'preview') {
           await f.runner.run(command, options);
           previewOptions.push({ privateOutput: options.privateOutput });
@@ -1435,7 +1449,7 @@ describe('installation engine: adopting an existing deployment', () => {
     const preview = calls.findIndex((line) => line.startsWith('pulumi preview --refresh --json'));
     const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
     const recheck = calls.findIndex((line) => line === 'pulumi preview --json');
-    const up = calls.findIndex((line) => line.startsWith('pulumi up'));
+    const up = calls.indexOf('pulumi up --yes --skip-preview');
     expect(preview).toBeGreaterThan(-1);
     // The gate reads without writing state; the refresh that rewrites it comes after, and the
     // gate runs once more right before the update is applied.
@@ -1921,10 +1935,13 @@ describe('installation engine: adopting an existing deployment', () => {
         (line) => line.startsWith('pulumi preview') && !line.includes('--refresh')
       );
       const firstState = calls.findIndex((line) => line.startsWith('pulumi state'));
-      const up = calls.findIndex((line) => line.startsWith('pulumi up'));
+      const markerUp = calls.indexOf(`pulumi up --target ${markerUrn} --yes --skip-preview`);
+      const up = calls.indexOf('pulumi up --yes --skip-preview');
       expect(gate).toBeLessThan(refresh);
       expect(refresh).toBeLessThan(recheck);
-      expect(recheck).toBeLessThan(firstState);
+      // Retirement starts after both gates, and creates the marker before any key leaves state.
+      expect(recheck).toBeLessThan(markerUp);
+      expect(markerUp).toBeLessThan(firstState);
       expect(stateCommands(calls).length).toBe(keyUrns.length * 2);
       const lastState =
         calls.length -

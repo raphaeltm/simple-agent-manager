@@ -195,7 +195,7 @@ echo ""
 echo "Checking the API Worker's installation keys (names only)..."
 if ! pnpm --filter @simple-agent-manager/api exec wrangler secret list --env "$ENVIRONMENT" --format json |
   pnpm exec tsx scripts/deploy/installation-keys.ts check-listing "$ENVIRONMENT"; then
-  echo -e "${RED}ERROR: the API Worker is missing installation keys; nothing was changed${NC}" >&2
+  echo -e "${RED}ERROR: the API Worker is missing installation keys, or its secrets could not be listed; nothing was changed${NC}" >&2
   exit 1
 fi
 echo ""
