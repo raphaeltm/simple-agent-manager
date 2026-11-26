@@ -123,9 +123,12 @@ tests it.
 ### F. Live proof (needs a signed-in Cloudflare account member)
 
 - [ ] F1. The token link pre-fills the three permissions.
+      **Outcome:** not confirmed by a person; see "Released for merge".
 - [ ] F2. Sign-in, choose, review and handoff work on the staging `workers.dev` installer.
+      **Outcome:** automated evidence only, up to Cloudflare's login page; see "Released for merge".
 - [ ] F3. After a completed install, removing the installer with its OAuth client leaves the
       installation's tokens working.
+      **Outcome:** not tested; tracked in idea `01M84YHD4FZP1C6PXK6AQZMEMM`.
 
 ## Implementation notes
 
@@ -267,12 +270,29 @@ things in its deploy job do change:
    Cloudflare when the address is reachable, and falls back to the Cloudflare API when the address
    answers the runner with a challenge.
 
-## HELD before merge
+## Released for merge by the owner, 2026-11-26
 
-F1–F3 need a signed-in member of the Cloudflare account and cannot be done by an agent. The automated
-proof stops at Cloudflare's login page. **Do not merge until F1 and F2 are recorded here with evidence,
-or Raphaël explicitly waives them.** F3 does not block: `remove` keeps the OAuth client by default, and
-the question is tracked in SAM idea `01M84YHD4FZP1C6PXK6AQZMEMM`.
+The hands-on check (inbox item `01M859TWQ0XHPX3AF7D3PVQWDN`) asked Raphaël to open the token link and
+to sign in on the staging `workers.dev` installer. On 2026-11-26 he replied that he does not want the
+installer to hold "Account API Tokens Write" and would rather create SAM's tokens through links, and,
+asked which order he wanted, chose **A: merge this PR now, then build the token flow as the next
+change** (SAM idea `01M8C788GRW2E95XPY4JHX8F2G`). He did not tick the sign-in step or say "waive", so
+what stands behind the merge is stated exactly:
+
+- **F1 (token link shows all three permissions): not confirmed by a person.** The guide lists the
+  three permissions by name beside the link and says to add any that is missing, and the deploy
+  command names a missing permission, so a dropped key costs a manual tick, not a failed install.
+- **F2 (sign-in on a `workers.dev` installer): not completed by a person past Cloudflare's login.**
+  Automated evidence on the PR head `2115dfa`: Cloudflare accepts the installer's client and callback
+  (run 45827556648), and a probe of the live test installer on 2026-11-26 showed that starting sign-in
+  sets the `__Host-` session cookie and redirects to Cloudflare; the session and callback routes
+  recognise that session (wrong state → `/?error=authorization`); and a missing cookie, a made-up
+  cookie and a foreign origin are refused (401, 401, 403). What only a signed-in person can show is
+  Cloudflare's code exchange and the account listing after it, which do not depend on the installer's
+  address and worked in the real installs of 6 to 8 November.
+- **F3 (deleting the OAuth client):** not tested; `remove` keeps the client by default (SAM idea
+  `01M84YHD4FZP1C6PXK6AQZMEMM`). The token flow he asked for is expected to remove the client
+  altogether.
 
 ## Acceptance criteria
 
@@ -287,7 +307,8 @@ the question is tracked in SAM idea `01M84YHD4FZP1C6PXK6AQZMEMM`.
 - [x] The production installer keeps its origin, mode, scopes and client (existing tests with explicit
       environment values still pass; deltas listed above).
 - [x] Docs describe only what the code does; no page tells people to use a hosted installer.
-- [ ] F1–F3 recorded with evidence, or the PR is held with the reason.
+- [x] F1–F3: recorded above exactly as far as they were verified; released for merge by the owner's
+      choice of option A on 2026-11-26.
 
 ## References
 
