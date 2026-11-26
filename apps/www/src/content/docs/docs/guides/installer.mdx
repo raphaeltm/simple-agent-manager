@@ -174,8 +174,10 @@ through the service.
    also set as `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` or `CF_AIG_TOKEN`, replace those first.
    Keep your own copy of the passphrase somewhere safe; the service cannot show it back to you.
 
-The takeover deploys the installer's approved source over your deployment, and it is careful to
-change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
+The takeover deploys the installer's approved source over your deployment. It first checks that
+this creates, replaces or deletes none of your resources, and it keeps your keys, settings and
+users (`scripts/deploy/installer-engine-adoption.ts`). The few settings the deploy applies outside
+that check are listed under "What the deploy itself applies" below:
 
 - **It stops before reading or changing your deployment** when the passphrase does not open the
   deploy state (`refuseUnopenableState`). Start the takeover again from the installer with the right

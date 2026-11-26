@@ -125,7 +125,7 @@ export function renderPlanSummary(plan, context) {
     ? `Your installation service will take over the SAM at ${appHost}${where}. Nothing changes until you approve the takeover there.`
     : `SAM will live at ${appHost}${where}. Cloudflare usage charges apply.`;
   $('confirm-full-copy').textContent = plan.adoption
-    ? 'Create an installation service in my account for this SAM. I approve the takeover itself there, after it checks that deploying SAM changes nothing else.'
+    ? 'Create an installation service in my account for this SAM. I approve the takeover itself there, after it checks that deploying SAM creates, replaces or deletes none of its resources.'
     : 'Build and deploy this approved installation in my account. Workers Paid and usage charges apply.';
   const arrow = document.createElement('span');
   arrow.setAttribute('aria-hidden', 'true');

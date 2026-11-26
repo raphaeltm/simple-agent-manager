@@ -131,7 +131,7 @@ async function auditFullAdopt(page: Page) {
     'Your installation service will take over the SAM at app.sam.example.com in Account 1.'
   );
   await expect(page.locator('#confirm-full-copy')).toContainText(
-    'I approve the takeover itself there'
+    'I approve the takeover itself there, after it checks that deploying SAM creates, replaces or deletes none of its resources.'
   );
   await expect(page.locator('#install')).toHaveText('Create my installation service\u00a0→');
   await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
@@ -460,6 +460,13 @@ async function auditTakeoverPanel(
   await page.goto(target);
   await expect(page.locator('.deployment-status strong')).toHaveText('Ready to take over');
   await expect(page.getByText('the build deploys the approved source over it')).toBeVisible();
+  // The approval states what is checked, and the settings the deploy applies outside that check.
+  await expect(
+    page.getByText(
+      'The deploy also applies settings the source needs: the upload rule on its storage bucket, and an AI Gateway if your account has none.'
+    )
+  ).toBeVisible();
+  await expect(page.getByText('nothing else would change')).toHaveCount(0);
   // The takeover is approved here and nowhere else: never pre-checked, disabled until ticked.
   const confirm = page.locator('input[name="confirmed"]');
   const takeOver = page.getByRole('button', { name: 'Take over SAM', exact: true });

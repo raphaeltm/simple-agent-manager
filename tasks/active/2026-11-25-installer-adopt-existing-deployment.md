@@ -391,3 +391,9 @@ Other writes of the same phase were read and left as they are, and are now docum
 Finding: the installer's review listed an Email row for every plan ("Sign-in codes come from agents.<domain>. Its sending records are added…"), which a takeover no longer does. Valid.
 
 Fix: for an adoption plan the row reads "Stays as it is. If your SAM sends sign-in codes from agents.<domain>, it keeps doing so. If it does not, the takeover does not set that up." (`renderCreatedDetails`, `apps/installer/public/installer/plan.js`). The installer does not read the deployed Worker's bindings at review time, so it states both outcomes instead of guessing one. The browser audit asserts the takeover wording in `full-adopt` and the original wording in `full-review`. Mutation: old wording served for adoption plans, `full-adopt` red on the expected substring; a first attempt on a second port was invalid because the installer answers only on its configured address.
+
+## Codex round 14 (on d9165880c): the approval promised "changes nothing else"
+
+Finding: the consent line and the service's takeover panel said the takeover checks that nothing else changes, while the deploy applies the assets bucket's upload CORS rule and creates the AI Gateway when the account has none, outside the Pulumi gates. Valid: the guide already listed them, the approval text did not.
+
+Fix (wording only; behaviour unchanged, both are configuration the approved source needs and a fork deploy applies the same): the consent line says the takeover is approved "after it checks that deploying SAM creates, replaces or deletes none of its resources"; the panel says what is checked and names the two settings the deploy also applies; the guide's lead sentence matches. Browser audit: clean run 156 screenshots, no overflow; panel sentence removed, `auditTakeoverPanel` red; consent line reverted, `full-adopt` red.
