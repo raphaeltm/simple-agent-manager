@@ -1,0 +1,71 @@
+/**
+ * The engine's two installation-key steps (task 01M8C74NYMDP2YYPAG17VXJB78):
+ *
+ * - `applyInfrastructure`: retires the old key resources from Pulumi state as the LAST step before
+ *   `pulumi up`, after both takeover gates have passed. A refused takeover therefore leaves the
+ *   deploy state exactly as it was, and the owner's old fork deploy still works. Every preview
+ *   excludes the key resources (and the retirement marker), so a gate neither plans their deletion
+ *   nor holds a RandomId's raw id. The takeover gate itself is unchanged.
+ * - `ensureInstallationKeys`: a brand-new installer installation gets its keys once, straight into
+ *   its API Worker. Every other run only checks they are there, by name.
+ */
+import {
+  createInstallationKeys,
+  inspectInstallationKeys,
+  requireInstallationKeys,
+  type WorkerAccess,
+} from './installation-keys.js';
+import { refuseResourceChanges } from './installer-engine-adoption.js';
+import { previewExcludeArgs, retireKeyResources } from './retire-key-resources.js';
+
+export interface InfrastructureSteps {
+  takeover: boolean;
+  /** URNs of the selected stack (scripts/deploy/pulumi-stack-urns.sh). */
+  listUrns(): Promise<string[]>;
+  /** `pulumi preview <flags> --json`, output kept private. */
+  previewJson(...flags: string[]): Promise<string>;
+  refresh(): Promise<unknown>;
+  /** Runs a Pulumi command with its output discarded. */
+  pulumiQuiet(args: string[]): Promise<unknown>;
+  up(): Promise<unknown>;
+  worker: WorkerAccess;
+}
+
+export async function applyInfrastructure(steps: InfrastructureSteps): Promise<void> {
+  const urns = await steps.listUrns();
+  const exclude = previewExcludeArgs(urns);
+  // The takeover gate comes first: preview --refresh reads the live resources without writing the
+  // state, while the refresh below rewrites it.
+  if (steps.takeover) await refuseResourceChanges(() => steps.previewJson('--refresh', ...exclude));
+  await steps.refresh();
+  // Checked again against the refreshed state, immediately before the update that applies it.
+  if (steps.takeover)
+    await refuseResourceChanges(
+      () => steps.previewJson(...exclude),
+      'These resources changed after the takeover was checked, so none was changed:'
+    );
+  await retireKeyResources({
+    urns,
+    requireKeys: () => requireInstallationKeys(steps.worker),
+    pulumi: async (args) => {
+      await steps.pulumiQuiet(args);
+    },
+  });
+  await steps.up();
+}
+
+/**
+ * A fresh installer installation (not an adoption, not a CI deploy) creates its keys when its
+ * Worker has none and its database has no users; any other run requires them all to be present.
+ */
+export async function ensureInstallationKeys(options: {
+  mayCreate: boolean;
+  worker: WorkerAccess;
+  databaseId: string;
+}): Promise<void> {
+  if (options.mayCreate && (await inspectInstallationKeys(options.worker)).state === 'absent') {
+    await createInstallationKeys({ ...options.worker, databaseId: options.databaseId });
+    return;
+  }
+  await requireInstallationKeys(options.worker);
+}

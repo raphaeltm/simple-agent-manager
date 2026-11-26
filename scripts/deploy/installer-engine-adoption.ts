@@ -30,36 +30,12 @@ const TAKEOVER_UPDATABLE_TYPES = new Set(['cloudflare:index/pagesProject:PagesPr
 const MAX_REFUSAL_LINES = 30;
 
 /**
- * Key material a deployment may have supplied as a GitHub-secret override instead of the value
- * Pulumi generated (`configure-secrets.sh` prefers the override). An adopted installation has no
- * GitHub secrets, so writing Pulumi's value would replace a working key: every stored credential
- * would become unreadable and every session invalid, with no way to read the override back. An
- * existing Worker secret with one of these names is therefore kept, on the takeover and on every
- * later update of an adopted installation.
+ * Worker secrets a deployment may have set as a GitHub-secret override that configure-secrets.sh
+ * would otherwise rewrite from its default. An adopted installation has no GitHub secrets, so an
+ * existing Worker secret with one of these names is kept, on the takeover and every later update.
+ * Installation keys are not listed: no deploy writes them at all (scripts/deploy/installation-keys.ts).
  */
-export const PRESERVED_KEY_SECRETS = [
-  'ENCRYPTION_KEY',
-  'JWT_PRIVATE_KEY',
-  'JWT_PUBLIC_KEY',
-  'PREVIEW_SIGNING_KEY',
-  'VAPID_PRIVATE_KEY',
-  'VAPID_PUBLIC_KEY',
-  'VAPID_SUBJECT',
-  'BETTER_AUTH_SECRET',
-  'CREDENTIAL_ENCRYPTION_KEY',
-  'DEPLOY_SIGNING_PRIVATE_KEY',
-  'DEPLOY_SIGNING_PUBLIC_KEY',
-] as const;
-
-/**
- * Halves of one key. Keeping one half while writing Pulumi's other half would leave a pair that
- * does not match, so if the Worker holds either half both are kept.
- */
-const KEY_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  ['JWT_PRIVATE_KEY', 'JWT_PUBLIC_KEY'],
-  ['VAPID_PRIVATE_KEY', 'VAPID_PUBLIC_KEY'],
-  ['DEPLOY_SIGNING_PRIVATE_KEY', 'DEPLOY_SIGNING_PUBLIC_KEY'],
-];
+export const PRESERVED_KEY_SECRETS = ['VAPID_SUBJECT'] as const;
 const MAX_REFUSAL_LINE_CHARS = 300;
 
 /** Worker vars the engine computes for every deploy; a deployed value must never replace them. */
@@ -199,8 +175,6 @@ export async function existingPreservedKeySecrets(
       .map((entry) => entry?.name)
       .filter((name): name is string => typeof name === 'string')
   );
-  for (const pair of KEY_PAIRS)
-    if (pair.some((name) => present.has(name))) for (const name of pair) present.add(name);
   return PRESERVED_KEY_SECRETS.filter((name) => present.has(name));
 }
 

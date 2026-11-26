@@ -4,11 +4,7 @@ import { join, resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
-import {
-  keepAdoptedDeployment,
-  refuseResourceChanges,
-  refuseRollback,
-} from './installer-engine-adoption.js';
+import { keepAdoptedDeployment, refuseRollback } from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -27,11 +23,13 @@ import {
   validateEngineConfig,
 } from './installer-engine-contract.js';
 import { deployEngineApi } from './installer-engine-deploy.js';
+import { applyInfrastructure, ensureInstallationKeys } from './installer-engine-keys.js';
 import { vmAgentPrebuiltKey } from './installer-engine-prebuilt.js';
 import { prebuiltSteps } from './installer-engine-prebuilt-steps.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 import { prepareStateBackend } from './installer-engine-state.js';
+import { previewExcludeArgs } from './retire-key-resources.js';
 export * from './installer-engine-contract.js';
 /** The checkpoint to resume from, or a new one; a checkpoint for other inputs is refused. */
 function startingCheckpoint(
@@ -156,6 +154,17 @@ export async function runInstallerEngine(
    */
   const previewJson = (...flags: string[]) =>
     execute('pulumi', ['preview', ...flags, '--json'], join(root, 'infra'), false, true);
+  /** URNs only: never `pulumi stack export`, whose RandomId ids are raw keys. */
+  const stackUrns = async () =>
+    (
+      await execute(
+        'bash',
+        [join(root, 'scripts/deploy/pulumi-stack-urns.sh')],
+        join(root, 'infra')
+      )
+    )
+      .split('\n')
+      .filter(Boolean);
   const wrangler = (app: string, ...args: string[]) =>
     pnpm('--filter', `@simple-agent-manager/${app}`, 'exec', 'wrangler', ...args);
   const request = (url: string, init?: RequestInit) =>
@@ -315,7 +324,11 @@ export async function runInstallerEngine(
   );
   if (c.dryRun) {
     // No --diff: a diff that deletes or replaces a random.RandomId prints its id, the raw key.
-    await phase('infrastructure-preview', () => pulumi('preview'));
+    // Key resources still in state are excluded: their planned deletion would refuse the
+    // preview, and its oldState would carry a RandomId's raw id.
+    await phase('infrastructure-preview', async () =>
+      pulumi('preview', ...previewExcludeArgs(await stackUrns()))
+    );
     state.status = 'completed';
     delete state.activePhase;
     await options.save(state);
@@ -405,25 +418,19 @@ export async function runInstallerEngine(
       execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
     )
   );
-  await phase('infrastructure', async () => {
-    // The takeover gate comes first: preview --refresh reads the live resources without writing
-    // the state, while the refresh below rewrites it.
-    if (c.adoption?.takeover) await refuseResourceChanges(() => previewJson('--refresh'));
-    await execute(
-      'bash',
-      [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
-      join(root, 'infra')
-    );
-    // Checked again against the refreshed state, immediately before the update that applies it.
-    // `pulumi up` cannot refuse operations itself: --expect-no-changes reports only after
-    // applying, and update plans (--plan) are experimental.
-    if (c.adoption?.takeover)
-      await refuseResourceChanges(
-        () => previewJson(),
-        'These resources changed after the takeover was checked, so none was changed:'
-      );
-    await pulumi('up', '--yes', '--skip-preview');
-  });
+  const apiWorker = `${prefix}-api-${stack}`;
+  await phase('infrastructure', () =>
+    applyInfrastructure({
+      takeover: !!c.adoption?.takeover,
+      listUrns: stackUrns,
+      previewJson,
+      refresh: () =>
+        execute('bash', [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')], join(root, 'infra')),
+      pulumiQuiet: (args) => execute('pulumi', args, join(root, 'infra'), true),
+      up: () => pulumi('up', '--yes', '--skip-preview'),
+      worker: { ...cloudflareAccess, worker: apiWorker },
+    })
+  );
   let outputs: Record<string, unknown> = {};
   await phase('resolve-infrastructure', async () => {
     const parsed: unknown = JSON.parse(await pulumi('stack', 'output', '--json'));
@@ -443,7 +450,7 @@ export async function runInstallerEngine(
     if (c.adoption)
       await keepAdoptedDeployment(env, {
         ...cloudflareAccess,
-        worker: `${prefix}-api-${stack}`,
+        worker: apiWorker,
         root,
       });
     Object.assign(env, {
@@ -515,6 +522,15 @@ export async function runInstallerEngine(
     if (existsSync(join(root, '.wrangler/tail-worker-first-deploy'))) await sync();
     if (firstDeploy) await deployApi();
   });
+  // Installation keys go straight into the API Worker and are never read back. Only a fresh
+  // installer installation may create them; adoptions and CI deploys must already have them.
+  await phase('installation-keys', () =>
+    ensureInstallationKeys({
+      mayCreate: !c.adoption && c.profile !== 'legacy-ci',
+      worker: { ...cloudflareAccess, worker: apiWorker },
+      databaseId: output('d1DatabaseId'),
+    })
+  );
   await phase('publish-application', async () => {
     await wrangler(
       'web',
@@ -580,7 +596,7 @@ export async function runInstallerEngine(
           apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
           accountId: c.accountId,
           token: String(env.CF_API_TOKEN),
-          worker: `${prefix}-api-${stack}`,
+          worker: apiWorker,
           pages: output('pagesName'),
           domain: c.baseDomain,
           commit: c.sourceCommit,
