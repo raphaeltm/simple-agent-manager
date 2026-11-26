@@ -644,7 +644,7 @@ The reviewed default churning selectors are listed in the [configuration referen
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
-Deploys automatically create `preview.BASE_DOMAIN`, its Worker route, and a persistent Pulumi-managed signing key. No manual GitHub secret is required. Keep the default hostname single-level so Cloudflare Universal SSL covers it. An override is for operators who have separately arranged DNS/TLS for that full hostname.
+Deploys automatically create `preview.BASE_DOMAIN`, its Worker route, and uses the installation's `PREVIEW_SIGNING_KEY`, one of its installation keys (see below). No manual GitHub secret is required. Keep the default hostname single-level so Cloudflare Universal SSL covers it. An override is for operators who have separately arranged DNS/TLS for that full hostname.
 
 instead of choosing a generic prefix.
 
@@ -687,7 +687,9 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets (`scripts/deploy/configure-secrets.sh`), registering every value it reads from Pulumi with GitHub's log masking before any other use. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
+**Installation keys** (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `PREVIEW_SIGNING_KEY`) exist only as secrets of your API Worker. They are created once, for a brand-new installation, by the installer (`createInstallationKeys`, `scripts/deploy/installation-keys.ts`), and nothing ever reads them back: they are not in Pulumi state, not in GitHub, and not shown to anyone. Deploys only check, by name, that the Worker still holds them (`scripts/deploy/configure-secrets.sh`) and fail if one is missing; they never create a replacement, because a new `ENCRYPTION_KEY` would make every stored credential unreadable. If an API Worker is deleted, its keys are gone with it.
+
+Deployments from before 2026-11-26 kept a copy of these keys in Pulumi state. Their next deploy removes those resources from the state without touching the values the Worker runs with (`scripts/deploy/retire-key-resources.ts`). A fork deployment that has no keys on its Worker (for example after a teardown) gets them by running `pnpm exec tsx scripts/deploy/installation-keys.ts create` on a machine you own, with `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `API_WORKER_NAME` and `D1_DATABASE_ID` set; it refuses to run in CI and refuses an installation whose database already has users.
 :::
 
 :::note[Provider resource ownership]

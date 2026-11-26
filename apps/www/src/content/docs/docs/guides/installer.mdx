@@ -160,8 +160,11 @@ through the service.
    neither.
 5. Create the installation service, open it, then tick **Check and take over this existing
    installation** and select **Take over SAM**.
-6. When the takeover has finished, disable both workflows in the fork (**Actions**, select the
-   workflow, **Disable workflow**), or archive the fork.
+6. Before you take over, disable both workflows in the fork (**Actions**, select the workflow,
+   **Disable workflow**), or archive the fork. The takeover moves your installation keys out of the
+   deploy state, so an older release's deploy can no longer manage the keys. As a safeguard, such a
+   deploy fails at its Pulumi step, before it could write new keys over the ones your SAM runs with
+   (`RETIREMENT_MARKER`, `scripts/deploy/retire-key-resources.ts`).
 
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):

@@ -47,10 +47,9 @@ Do not ask users to supply platform-owned signing/encryption material when SAM c
 
 Examples:
 
-- `ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, and `VAPID_SUBJECT` are Worker runtime secrets, not required manual GitHub Environment secrets for fresh installs.
+- **Installation keys** (`ENCRYPTION_KEY`, the JWT, VAPID and deploy-signing pairs, `PREVIEW_SIGNING_KEY`) are API Worker secrets only. `createInstallationKeys` (`scripts/deploy/installation-keys.ts`) creates them once, for a brand-new installation (no keys, no users), from the installer or an operator's machine, never CI. Nothing exports, displays or returns a key (Raphaël, 2026-11-26).
+- Deploys never read, derive or write them: `configure-secrets.sh` checks their names and fails if one is missing. They are not Pulumi resources (a RandomId's id is its raw bytes); old stacks retire them by name (`scripts/deploy/retire-key-resources.ts`). A new deployment-owned secret follows the same shape.
 - `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs only. New VM nodes generate Origin CA private keys locally and fetch signed certificates through the node-scoped callback endpoint.
-- Pulumi persists the generated source key material; `scripts/deploy/configure-secrets.sh` derives any runtime public keys and copies the resulting values into Cloudflare Worker secrets.
-- GitHub Environment secrets with the same names are compatibility/rotation overrides only. When adding new deployment-owned secrets, prefer Pulumi generation plus an explicit override path over a new manual prerequisite.
 
 ## Wrangler Environment Sections (Generated at Deploy Time)
 

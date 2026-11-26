@@ -2195,4 +2195,3 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           API_URL: ${{ steps.deploy_resources.outputs.api_url }}
           APP_URL: ${{ steps.deploy_resources.outputs.app_url }}
-
