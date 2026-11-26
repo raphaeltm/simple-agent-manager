@@ -9,6 +9,7 @@ import {
   refuseForcedSetup,
   refuseResourceChanges,
   refuseRollback,
+  refuseUnopenableState,
 } from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
@@ -329,6 +330,9 @@ export async function runInstallerEngine(
   };
   if (c.adoption?.takeover)
     await phase('adoption-preflight', async () => {
+      await refuseUnopenableState(() =>
+        execute('pulumi', ['stack'], join(root, 'infra'), true, true)
+      );
       await refuseForcedSetup({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
       await refuseRollback({
         ...cloudflareAccess,

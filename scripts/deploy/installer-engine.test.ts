@@ -1232,6 +1232,8 @@ describe('installation engine: adopting an existing deployment', () => {
     setupForce?: string;
     /** Active superadmins in the deployed database, not counting the system row. */
     owners?: number;
+    /** `pulumi stack` cannot open the state's secrets: exit 1 with this failure tail. */
+    unopenableStateTail?: string[];
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1249,9 +1251,21 @@ describe('installation engine: adopting an existing deployment', () => {
     const requests: string[] = [];
     const previewOptions: Array<{ privateOutput?: boolean }> = [];
     const ownerQueries: string[] = [];
+    const stateOpenings: Array<{ privateOutput?: boolean; discardOutput?: boolean }> = [];
     const runner: EngineRunner = {
       ...f.runner,
       async run(command, options) {
+        // Bare `pulumi stack`: the one early command that needs the passphrase.
+        if (command.executable === 'pulumi' && command.args.join(' ') === 'stack') {
+          await f.runner.run(command, options);
+          stateOpenings.push({
+            privateOutput: options.privateOutput,
+            discardOutput: options.discardOutput,
+          });
+          if (world.unopenableStateTail)
+            throw new EngineCommandFailure(1, null, world.unopenableStateTail);
+          return '';
+        }
         if (
           command.executable === 'pulumi' &&
           command.args[0] === 'stack' &&
@@ -1337,7 +1351,7 @@ describe('installation engine: adopting an existing deployment', () => {
       },
     };
     const lines = () => f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
-    return { ...f, runner, requests, lines, previewOptions, ownerQueries };
+    return { ...f, runner, requests, lines, previewOptions, ownerQueries, stateOpenings };
   }
   async function run(
     input: InstallerEngineConfig,
@@ -1589,6 +1603,48 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('refuses a takeover whose passphrase does not open the deploy state, before anything else', async () => {
+    // What Pulumi 3.278 prints for a wrong passphrase, plus a line no report may repeat.
+    const stateLine = 'CANARY-line-from-the-stack-listing';
+    const f = adoptionFixture({
+      unopenableStateTail: [
+        stateLine,
+        'error: failed to decrypt: incorrect passphrase, please set PULUMI_CONFIG_PASSPHRASE to the correct passphrase',
+      ],
+    });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      "The deploy state of this SAM could not be opened with the passphrase you entered, so nothing was changed. This is what a wrong passphrase looks like. Start the takeover again from the installer with the deployment's PULUMI_CONFIG_PASSPHRASE.",
+    ]);
+    expect(JSON.stringify(events)).not.toContain(stateLine);
+    // Refused before the deployment is read, before the agent and CLI builds, before any change.
+    expect(f.requests.some((line) => line.endsWith('/settings'))).toBe(false);
+    expect(f.requests.some((line) => line.endsWith('/query'))).toBe(false);
+    const calls = f.lines();
+    for (const step of [
+      'pulumi stack output',
+      'pulumi preview',
+      'pulumi-refresh-safe.sh',
+      'pulumi up',
+      'wrangler',
+      'make -C',
+    ])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+  });
+
+  it('opens the deploy state once on a takeover, privately, before reading the deployment', async () => {
+    const f = adoptionFixture();
+    expect((await run(adopted, f)).error).toBeUndefined();
+    expect(f.stateOpenings).toEqual([{ privateOutput: true, discardOutput: true }]);
+    const calls = f.lines();
+    expect(calls.indexOf('pulumi stack')).toBeGreaterThan(-1);
+    expect(calls.indexOf('pulumi stack')).toBeLessThan(calls.indexOf('pulumi stack output --json'));
+    // Liveness for the refusal test above: a takeover that opens its state does build and deploy.
+    expect(calls.some((line) => line.includes('make -C'))).toBe(true);
+    expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(true);
   });
 
   it('refuses a takeover while forced setup is switched on, before reading or changing anything else', async () => {

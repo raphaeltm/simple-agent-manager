@@ -148,7 +148,10 @@ through the service.
    its deploy-state passphrase: the `PULUMI_CONFIG_PASSPHRASE` the deployment was set up with. It
    passes through the installer, which drops its copy at handoff, and is then kept only as a secret
    of the installation service in your account. A wrong passphrase stops the takeover at its first
-   step, before it changes anything.
+   check, before it reads or changes your deployment (`refuseUnopenableState`). The passphrase
+   unlocks your deployment's keys, so enter it only at an installer you trust: check the address, or
+   [host the installer yourself](#host-the-installer-yourself). The administrator email on the form
+   is not used to change who administers your SAM; it is only shown on your installation service.
 3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its
    deploy-state bucket**. Otherwise leave it empty.
 4. **Review** finds the deployment from its API Worker route (`<prefix>-api-<stack>`) and its assets
@@ -162,10 +165,21 @@ through the service.
    installation** and select **Take over SAM**.
 6. When the takeover has finished, disable both workflows in the fork (**Actions**, select the
    workflow, **Disable workflow**), or archive the fork.
+7. Retire the fork's credentials once you have checked that your SAM works. Your SAM no longer uses
+   the Cloudflare API token and R2 access key the fork deployed with: the takeover gave its API
+   Worker the installation service's own token and storage key (`CF_API_TOKEN`, `R2_ACCESS_KEY_ID`
+   and `R2_SECRET_ACCESS_KEY` in `scripts/deploy/configure-secrets.sh`). Revoke the old ones in
+   Cloudflare and delete the secrets from the fork's GitHub Environment, including its copy of the
+   passphrase. One exception: other Worker secrets are left as they are, so if the same token was
+   also set as `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` or `CF_AIG_TOKEN`, replace those first.
+   Keep your own copy of the passphrase somewhere safe; the service cannot show it back to you.
 
 The takeover deploys the installer's approved source over your deployment, and it is careful to
 change nothing else (`scripts/deploy/installer-engine-adoption.ts`):
 
+- **It stops before reading or changing your deployment** when the passphrase does not open the
+  deploy state (`refuseUnopenableState`). Start the takeover again from the installer with the right
+  one.
 - **It stops before changing your deployment** while forced setup is switched on
   (`SETUP_FORCE=true`, `refuseForcedSetup`). That switch reopens the setup page for account
   recovery. A takeover would switch it off under you, and keeping it on would leave an emergency

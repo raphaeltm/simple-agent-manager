@@ -224,6 +224,26 @@ async function deployedPlainTextVars(
 }
 
 /**
+ * Takeover step 1a, before the deployment is read or anything changes. `pulumi stack` opens the
+ * state's secrets, so it fails at once on a wrong passphrase, and it neither runs the program
+ * nor calls a provider. `pulumi stack output` cannot stand in: it never decrypts and succeeds
+ * with any passphrase (both measured offline on Pulumi 3.278). A wrong passphrase can change
+ * nothing either way, since preview, refresh and up all refuse it; without this check it would
+ * surface only at the first preview, as an unexplained preview failure. The command's output
+ * lists the stack's resources, so none of it is reported.
+ */
+export async function refuseUnopenableState(openState: () => Promise<unknown>): Promise<void> {
+  try {
+    await openState();
+  } catch (error) {
+    if (!(error instanceof EngineCommandFailure)) throw error;
+    throw new AdoptionRefused([
+      "The deploy state of this SAM could not be opened with the passphrase you entered, so nothing was changed. This is what a wrong passphrase looks like. Start the takeover again from the installer with the deployment's PULUMI_CONFIG_PASSPHRASE.",
+    ]);
+  }
+}
+
+/**
  * Takeover step 1b, before anything changes. `SETUP_FORCE=true` reopens the deployment's setup
  * page so a locked-out owner can recover (`isSetupCompleted`, platform-config-core.ts). A
  * takeover deploys without it, which would close setup under someone in the middle of a
