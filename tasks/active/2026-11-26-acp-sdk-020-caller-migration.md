@@ -12,7 +12,9 @@ Impact: VM ACP handshake, message extraction/normalization, trusted-origin marke
 - [x] Reproduce and fix nested-schema restrictions lost by typed SDK decoding before host validation (six red wire-entry cases, then green valid/invalid controls).
 - [x] Complete full Go race/vet/build checks and focused regression coverage (31 packages, 4,327 passing tests/subtests under race; final focused race run 26 cases).
 - [x] Finish local Go/security/test/completion reviews and address all findings (HIGH typed-schema constraint loss and MEDIUM escaping bound fixed with red/green controls).
-- [ ] Push original branch; answer existing review, reconcile current-head CI and request CodeRabbit best effort.
+- [x] Push original branch; answer and resolve existing review; request CodeRabbit once (45822486025 failed known missing PAT; wait ended).
+- [x] Current-head compile/smoke/integration pass. Sonar duplication in wire-form owner fixtures refactored through shared assertion helper; 28 focused race tests pass.
+- [ ] Full latest-head CI/Sonar and Go vulnerability gate (inherit reviewed #2999 security prerequisite through main after its release).
 - [ ] Once existing Cloudflare/header setup and #3014 runner proof unblock staging, merge main without rewriting history, deploy under lease, verify real VM ACP prompt/tool/form/usage behavior, cleanup.
 - [ ] Merge only with every applicable gate green and verify actual rollout/basic production smoke.
 

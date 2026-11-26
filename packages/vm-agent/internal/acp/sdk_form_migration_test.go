@@ -66,50 +66,49 @@ func TestSDKWireFormRejectsNestedConstraintsBeforeDecode(t *testing.T) {
 }
 
 func TestSDKWireFormValidOwnerControl(t *testing.T) {
-	recorder := newInteractionRecorder(t, http.StatusCreated)
-	host, client := newInteractionHost(recorder)
-	t.Cleanup(host.Stop)
-	host.ConfigureAcpInteractions(testFormConfig())
-	request := readSDKWireForm(t, `{"type":"string","enum":["yes","no"]}`)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	responses := make(chan acpsdk.CreateElicitationResponse, 1)
-	go func() { response, _ := client.CreateElicitation(ctx, request); responses <- response }()
-	created := waitCreate(t, recorder)
-	if got := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, AcpInteractionAnswerDecision{Kind: "accepted", Content: map[string]any{"question": "yes"}, AnswerHash: "fixture"}); got != "consumed" {
-		t.Fatalf("receipt=%s", got)
-	}
-	select {
-	case response := <-responses:
-		if response.Accept == nil || response.Accept.Content["question"].String == nil || string(*response.Accept.Content["question"].String) != "yes" {
-			t.Fatalf("response=%+v", response)
-		}
-	case <-ctx.Done():
-		t.Fatal("valid form never returned")
-	}
+	assertSDKWireFormAnswer(t, `{"type":"string","enum":["yes","no"]}`, "yes")
 }
 
 func TestSDKWireFormEscapedTextOwnerControl(t *testing.T) {
+	assertSDKWireFormAnswer(t, `{"type":"string","description":"`+strings.Repeat("<>&", 100)+`","default":"`+strings.Repeat("<", 100)+`"}`, "yes")
+}
+
+// Every accepted schema goes through the ordered reader, SDK decode, durable
+// interaction registry and typed response encoding, with the same assertions.
+func assertSDKWireFormAnswer(t *testing.T, field string, value any) {
+	t.Helper()
 	recorder := newInteractionRecorder(t, http.StatusCreated)
 	host, client := newInteractionHost(recorder)
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testFormConfig())
-	request := readSDKWireForm(t, `{"type":"string","description":"`+strings.Repeat("<>&", 100)+`","default":"`+strings.Repeat("<", 100)+`"}`)
+	request := readSDKWireForm(t, field)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	responses := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() { response, _ := client.CreateElicitation(ctx, request); responses <- response }()
 	created := waitCreate(t, recorder)
-	if got := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, AcpInteractionAnswerDecision{Kind: "accepted", Content: map[string]any{"question": "yes"}, AnswerHash: "fixture"}); got != "consumed" {
+	answer := map[string]any{"question": value}
+	if got := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, AcpInteractionAnswerDecision{Kind: "accepted", Content: answer, AnswerHash: "fixture"}); got != "consumed" {
 		t.Fatalf("receipt=%s", got)
 	}
 	select {
 	case response := <-responses:
-		if response.Accept == nil || response.Accept.Content["question"].String == nil || string(*response.Accept.Content["question"].String) != "yes" {
+		if response.Accept == nil {
 			t.Fatalf("response=%+v", response)
 		}
+		encoded, err := json.Marshal(response.Accept.Content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := json.Marshal(answer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(encoded) != string(want) {
+			t.Fatalf("content=%s want=%s", encoded, want)
+		}
 	case <-ctx.Done():
-		t.Fatal("valid form never returned")
+		t.Fatal("typed answer never returned")
 	}
 }
 
@@ -124,39 +123,7 @@ func TestSDKFormAnswerPrimitiveTypes(t *testing.T) {
 		{"string array", `{"type":"array","items":{"type":"string","enum":["yes","no"]}}`, []any{"yes"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := newInteractionRecorder(t, http.StatusCreated)
-			host, client := newInteractionHost(recorder)
-			t.Cleanup(host.Stop)
-			host.ConfigureAcpInteractions(testFormConfig())
-			request := readSDKWireForm(t, tc.field)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			responses := make(chan acpsdk.CreateElicitationResponse, 1)
-			go func() { response, _ := client.CreateElicitation(ctx, request); responses <- response }()
-			created := waitCreate(t, recorder)
-			answer := map[string]any{"question": tc.value}
-			if got := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, AcpInteractionAnswerDecision{Kind: "accepted", Content: answer, AnswerHash: "fixture"}); got != "consumed" {
-				t.Fatalf("receipt=%s", got)
-			}
-			select {
-			case response := <-responses:
-				if response.Accept == nil {
-					t.Fatalf("response=%+v", response)
-				}
-				encoded, err := json.Marshal(response.Accept.Content)
-				if err != nil {
-					t.Fatal(err)
-				}
-				want, err := json.Marshal(answer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if string(encoded) != string(want) {
-					t.Fatalf("content=%s want=%s", encoded, want)
-				}
-			case <-ctx.Done():
-				t.Fatal("typed answer never returned")
-			}
+			assertSDKWireFormAnswer(t, tc.field, tc.value)
 		})
 	}
 }
