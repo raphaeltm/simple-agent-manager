@@ -178,13 +178,18 @@ function allowAnthropicPlatformAuth() {
   });
 }
 
-function expectUsageIncrement(inputTokens: number, outputTokens: number) {
+function expectUsageIncrement(inputTokens: number, outputTokens: number, catalogPriced = true) {
   expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
     expect.anything(),
     'user1',
     inputTokens,
     outputTokens,
-    expect.objectContaining({ AI_PROXY_ENABLED: 'true' })
+    expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+    // Gateway install: a catalog price goes to the monthly-cap backstop (ai-cost-estimate.ts);
+    // a model with no catalog price records no estimate.
+    ...(catalogPriced
+      ? [expect.objectContaining({ costUsd: expect.any(Number), monthKey: expect.any(String) })]
+      : [])
   );
 }
 
@@ -258,7 +263,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     await res.text();
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(init.headers).not.toMatchObject({ 'cf-aig-collect-log': 'false' });
-    expectUsageIncrement(10, 4);
+    expectUsageIncrement(10, 4, false);
   });
 
   it('increments token usage after a successful streaming response', async () => {
@@ -298,7 +303,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(res.status).toBe(200);
     await res.text();
     await incremented;
-    expectUsageIncrement(11, 5);
+    expectUsageIncrement(11, 5, false);
   });
 
   it('does not increment token usage for failed upstream responses', async () => {

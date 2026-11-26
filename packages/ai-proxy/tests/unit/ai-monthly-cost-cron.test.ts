@@ -1,6 +1,7 @@
 import { DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS } from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseGatewayMonthlyCost } from '../../src/ai-cost-estimate';
 import type { AIGatewayLogEntry } from '../../src/ai-gateway-logs';
 import type { AiProxyEnv as Env } from '../../src/env';
 
@@ -61,6 +62,7 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
 } {
   const store = new Map<string, string>();
   const ttlByKey = new Map<string, number | undefined>();
+  const metadataByKey = new Map<string, unknown>();
   return {
     _store: store,
     _ttlByKey: ttlByKey,
@@ -71,11 +73,19 @@ function createMockKV(failingKeys: Set<string> = new Set()): KVNamespace & {
       }
       store.set(key, value);
       ttlByKey.set(key, options?.expirationTtl);
+      if (options?.metadata === undefined) metadataByKey.delete(key);
+      else metadataByKey.set(key, options.metadata);
     }),
     delete: vi.fn(async (key: string) => {
       store.delete(key);
     }),
-    list: vi.fn(async () => ({ keys: [], list_complete: true, cacheStatus: null })),
+    list: vi.fn(async (options?: { prefix?: string }) => ({
+      keys: [...store.keys()]
+        .filter((name) => name.startsWith(options?.prefix ?? ''))
+        .map((name) => ({ name, metadata: metadataByKey.get(name) })),
+      list_complete: true,
+      cacheStatus: null,
+    })),
     getWithMetadata: vi.fn(async () => ({ value: null, metadata: null, cacheStatus: null })),
   } as unknown as KVNamespace & {
     _store: Map<string, string>;
@@ -153,6 +163,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.25, metadata: { userId: 'user-a' } }));
         visitor(makeGatewayEntry({ id: 'entry-3', cost: 0.2, metadata: { userId: 'user-b' } }));
         visitor(makeGatewayEntry({ id: 'entry-4', cost: 9, metadata: null }));
+        return { truncated: false };
       }
     );
 
@@ -164,8 +175,22 @@ describe('runMonthlyCostAggregation', () => {
     );
 
     expect(result).toEqual({ enabled: true, usersUpdated: 2, totalEntries: 4, errors: 0 });
-    expect(kv._store.get('ai-monthly-cost:user-a:2026-06')).toBe('0.350000');
-    expect(kv._store.get('ai-monthly-cost:user-b:2026-06')).toBe('0.200000');
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-a:2026-06') ?? null)
+    ).toEqual({
+      costUsd: 0.35,
+      asOfMs: expect.any(Number),
+      truncated: false,
+      // A complete read settles every log older than the one-hour settle margin.
+      settled: { usd: 0.35, beforeMs: Date.parse('2026-06-15T11:34:56.000Z') },
+    });
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
+    ).toMatchObject({
+      costUsd: 0.2,
+      asOfMs: expect.any(Number),
+      truncated: false,
+    });
     expect(kv._ttlByKey.get('ai-monthly-cost:user-a:2026-06')).toBe(3600);
     expect(kv._ttlByKey.get('ai-monthly-cost:user-b:2026-06')).toBe(3600);
     expect(mockIterateGatewayLogs).toHaveBeenCalledWith(
@@ -193,6 +218,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor: (entry: AIGatewayLogEntry) => void
       ) => {
         visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+        return { truncated: false };
       }
     );
 
@@ -220,6 +246,7 @@ describe('runMonthlyCostAggregation', () => {
         visitor: (entry: AIGatewayLogEntry) => void
       ) => {
         visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+        return { truncated: false };
       }
     );
 
@@ -259,6 +286,7 @@ describe('runMonthlyCostAggregation', () => {
       ) => {
         visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
         visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.2, metadata: { userId: 'user-b' } }));
+        return { truncated: false };
       }
     );
 
@@ -266,6 +294,234 @@ describe('runMonthlyCostAggregation', () => {
 
     expect(result).toEqual({ enabled: true, usersUpdated: 1, totalEntries: 2, errors: 1 });
     expect(kv._store.has(failingKey)).toBe(false);
-    expect(kv._store.get('ai-monthly-cost:user-b:2026-06')).toBe('0.200000');
+    expect(
+      parseGatewayMonthlyCost(kv._store.get('ai-monthly-cost:user-b:2026-06') ?? null)
+    ).toMatchObject({
+      costUsd: 0.2,
+      asOfMs: expect.any(Number),
+      truncated: false,
+    });
+  });
+
+  describe('a read past the page cap', () => {
+    const NOW = Date.parse('2026-06-15T12:34:56.000Z');
+    const MIN = 60_000;
+    const at = (ms: number) => new Date(ms).toISOString();
+    const key = (user: string) => `ai-monthly-cost:${user}:2026-06`;
+    /** Serve `entries` as the read, newest first, reporting the page cap as reached. */
+    const serve = (entries: AIGatewayLogEntry[], truncated = true) =>
+      mockIterateGatewayLogs.mockImplementation(
+        async (
+          _env: Env,
+          _ports: unknown,
+          _gatewayId: string,
+          _startDate: string,
+          visitor: (entry: AIGatewayLogEntry) => void
+        ) => {
+          for (const entry of entries) visitor(entry);
+          return { truncated };
+        }
+      );
+    let nextId = 0;
+    const spend = (user: string, createdMs: number, cost: number) =>
+      makeGatewayEntry({
+        id: `log-${user}-${createdMs}-${nextId++}`,
+        cost,
+        created_at: at(createdMs),
+        metadata: { userId: user },
+      });
+    const read = (kv: ReturnType<typeof createMockKV>, user: string) =>
+      parseGatewayMonthlyCost(kv._store.get(key(user)) ?? null);
+
+    it('adds spend that pushed older logs out of the window (Codex P1 on #3015)', async () => {
+      const kv = createMockKV();
+      const boundary = NOW - 70 * MIN;
+      // Previous complete read: $100, all of it settled before `boundary`.
+      kv._store.set(
+        key('user-a'),
+        JSON.stringify({
+          costUsd: 100,
+          asOfMs: boundary + 10 * MIN,
+          settledUsd: 100,
+          settledBeforeMs: boundary,
+        })
+      );
+      // This read is the newest window: $10 of new spend, and $90 of the old logs ($10 of old
+      // logs fell out of the window). Its own total is also $100.
+      serve([spend('user-a', NOW - 5 * MIN, 10), spend('user-a', boundary - MIN, 90)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toEqual({
+        costUsd: 110,
+        asOfMs: NOW,
+        truncated: false,
+        // The $10 is newer than the one-hour settle margin, so it is not settled yet.
+        settled: { usd: 100, beforeMs: NOW - 60 * MIN },
+      });
+    });
+
+    it('accumulates exactly across consecutive truncated runs', async () => {
+      const kv = createMockKV();
+      // Run 1, complete: $5, settled (older than an hour).
+      vi.setSystemTime(NOW - 60 * MIN);
+      serve([spend('user-a', NOW - 150 * MIN, 5)], false);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      // Run 2, truncated window that no longer contains the $5 log: $3 new.
+      vi.setSystemTime(NOW);
+      serve([spend('user-a', NOW - 30 * MIN, 3), spend('user-b', NOW - 130 * MIN, 0)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 8, truncated: false });
+      // Run 3, an hour later: the window moved again, $2 new; the unsettled $3 log is still in it.
+      vi.setSystemTime(NOW + 60 * MIN);
+      serve([
+        spend('user-a', NOW + 20 * MIN, 2),
+        spend('user-a', NOW - 30 * MIN, 3),
+        spend('user-b', NOW - 70 * MIN, 0),
+      ]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 10, truncated: false });
+    });
+
+    it('carries a user with no log in the window forward at their settled spend', async () => {
+      const kv = createMockKV();
+      kv._store.set(
+        key('user-b'),
+        JSON.stringify({
+          costUsd: 0.3,
+          asOfMs: NOW - 60 * MIN,
+          settledUsd: 0.3,
+          settledBeforeMs: NOW - 70 * MIN,
+        })
+      );
+      kv._store.set('ai-monthly-cost:user-c:1999-01', '9');
+      serve([spend('user-a', NOW - 80 * MIN, 1)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      // All of user-b's spend is in logs older than this window, which reaches back past their
+      // boundary: the total is their settled spend, still exact.
+      expect(read(kv, 'user-b')).toMatchObject({ costUsd: 0.3, truncated: false });
+      expect(kv._store.get('ai-monthly-cost:user-c:1999-01')).toBe('9');
+    });
+
+    it('marks a lower bound when the window does not reach the previous boundary', async () => {
+      const kv = createMockKV();
+      kv._store.set(
+        key('user-a'),
+        JSON.stringify({
+          costUsd: 4,
+          asOfMs: NOW - 60 * MIN,
+          settledUsd: 4,
+          settledBeforeMs: NOW - 70 * MIN,
+        })
+      );
+      serve([spend('user-a', NOW - 5 * MIN, 1), spend('user-a', NOW - 50 * MIN, 2)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toEqual({
+        costUsd: 7,
+        asOfMs: NOW,
+        truncated: true,
+        settled: { usd: 4, beforeMs: NOW - 60 * MIN },
+      });
+    });
+
+    it('treats a window that starts exactly at the boundary as a gap', async () => {
+      const kv = createMockKV();
+      const boundary = NOW - 70 * MIN;
+      kv._store.set(
+        key('user-a'),
+        JSON.stringify({
+          costUsd: 4,
+          asOfMs: NOW - 60 * MIN,
+          settledUsd: 4,
+          settledBeforeMs: boundary,
+        })
+      );
+      // Logs sharing the oldest timestamp may continue on the page the cap cut off.
+      serve([spend('user-a', boundary, 1)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 5, truncated: true });
+    });
+
+    it('keeps a lower bound flagged as it chains', async () => {
+      const kv = createMockKV();
+      kv._store.set(
+        key('user-a'),
+        JSON.stringify({
+          costUsd: 4,
+          asOfMs: NOW - 60 * MIN,
+          truncated: true,
+          settledUsd: 4,
+          settledBeforeMs: NOW - 70 * MIN,
+        })
+      );
+      // The window covers everything since the boundary, but the base itself was low.
+      serve([spend('user-a', NOW - 5 * MIN, 1), spend('user-a', NOW - 80 * MIN, 1)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 5, truncated: true });
+    });
+
+    it('never moves a settled boundary back when the lag margin grows', async () => {
+      const kv = createMockKV();
+      const boundary = NOW - 5 * MIN;
+      // Settled with a 0-second margin: the $1 log at NOW - 7 min is in the $4.
+      kv._store.set(
+        key('user-a'),
+        JSON.stringify({ costUsd: 4, asOfMs: boundary, settledUsd: 4, settledBeforeMs: boundary })
+      );
+      serve([spend('user-a', NOW - 7 * MIN, 1), spend('user-b', NOW - 30 * MIN, 1)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv })); // one-hour settle margin
+      expect(read(kv, 'user-a')).toMatchObject({
+        costUsd: 4,
+        settled: { usd: 4, beforeMs: boundary },
+      });
+    });
+
+    it('falls back to the larger total, as a lower bound, without a settled part', async () => {
+      const kv = createMockKV();
+      kv._store.set(key('user-a'), '{"costUsd":0.5,"asOfMs":1}');
+      kv._store.set(key('user-b'), '0.300000');
+      serve([spend('user-a', NOW - 5 * MIN, 0.1)]);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toEqual({ costUsd: 0.5, asOfMs: NOW, truncated: true });
+      expect(read(kv, 'user-b')).toEqual({ costUsd: 0.3, asOfMs: NOW, truncated: true });
+    });
+
+    it('counts a log with an unparseable time in the total but never settles it', async () => {
+      const kv = createMockKV();
+      serve(
+        [
+          spend('user-a', NOW - 90 * MIN, 1),
+          makeGatewayEntry({
+            id: 'entry-garbage',
+            cost: 2,
+            created_at: 'garbage',
+            metadata: { userId: 'user-a' },
+          }),
+        ],
+        false
+      );
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 3, settled: { usd: 1 } });
+    });
+
+    it('reads previous totals from the key list, with no KV get per user', async () => {
+      const kv = createMockKV();
+      vi.setSystemTime(NOW - 60 * MIN);
+      serve([spend('user-a', NOW - 150 * MIN, 5), spend('user-b', NOW - 150 * MIN, 1)], false);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      vi.setSystemTime(NOW);
+      serve([spend('user-a', NOW - 30 * MIN, 3), spend('user-c', NOW - 130 * MIN, 0)]);
+      vi.mocked(kv.get).mockClear();
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(kv.get).not.toHaveBeenCalled();
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 8, truncated: false });
+      expect(read(kv, 'user-b')).toMatchObject({ costUsd: 1, truncated: false });
+    });
+
+    it('counts an entry the paginated read returned twice once', async () => {
+      const kv = createMockKV();
+      const entry = { ...spend('user-a', NOW - 90 * MIN, 1), id: 'log-1' };
+      serve([entry, { ...spend('user-a', NOW - 95 * MIN, 2), id: 'log-2' }, entry], false);
+      await runMonthlyCostAggregation(makeEnv({ KV: kv }));
+      expect(read(kv, 'user-a')).toMatchObject({ costUsd: 3, settled: { usd: 3 } });
+    });
   });
 });

@@ -1,14 +1,21 @@
 import { log } from '@simple-agent-manager/worker-core';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
-import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
+import { buildCostEstimateWrite } from './ai-cost-estimate';
+import { priceReportedUsage } from './ai-cost-pricing';
 import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
   incrementTokenUsage,
 } from './ai-token-budget';
+import { UTF8 } from './ai-token-input-estimates';
 import type { AiProxyEnv } from './env';
+
+export {
+  estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
+} from './ai-token-input-estimates';
 
 export type TokenUsageFormat = 'openai' | 'anthropic';
 
@@ -43,6 +50,9 @@ export interface TokenUsageAccountingOptions {
   fallbackInputTokens?: number;
   /** Platform-billed catalog model; BYO and custom endpoints leave this unset. */
   costModelId?: string;
+  /** The call bypassed AI Gateway (passthrough), so SAM's price is its only spend record. */
+  directUpstream?: boolean;
+  /** Estimate usage the upstream did not report. Always on for a platform-priced call. */
   estimateMissingUsage?: boolean;
   provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
@@ -57,12 +67,21 @@ export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountin
   headers: Headers;
 }
 
+/**
+ * A platform-priced call (`costModelId`) always estimates usage the upstream did not report: on a
+ * gateway install the backstop estimate is the only record of it until the hourly gateway total,
+ * and without a gateway SAM's record is the spend record. Callers opt in for other calls.
+ */
+function estimatesMissingUsage(options: TokenUsageAccountingOptions): boolean {
+  return options.estimateMissingUsage === true || options.costModelId !== undefined;
+}
+
 export async function accountTokenUsageFromJson(
   payload: unknown,
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
-  if (options.estimateMissingUsage && usage.outputTokens === undefined)
+  if (estimatesMissingUsage(options) && usage.outputTokens === undefined)
     usage.outputBytes = jsonOutputByteLength(payload, options.format);
   await incrementExtractedUsage(usage, options);
 }
@@ -72,8 +91,8 @@ export function accountTokenUsageFromStream(
   options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format, options.estimateMissingUsage === true).then(
-      (usage) => incrementExtractedUsage(usage, options)
+    collectStreamTokenUsage(stream, options.format, estimatesMissingUsage(options)).then((usage) =>
+      incrementExtractedUsage(usage, options)
     ),
     options
   );
@@ -109,7 +128,7 @@ export async function attachTokenUsageAccounting(
   try {
     await accountTokenUsageFromJson(
       payload,
-      options.estimateMissingUsage ? options : { ...options, fallbackInputTokens: undefined }
+      estimatesMissingUsage(options) ? options : { ...options, fallbackInputTokens: undefined }
     );
   } catch (err) {
     log.warn('ai_proxy.token_usage_increment_failed', {
@@ -197,26 +216,6 @@ export function measuredTokenUsage(
   };
 }
 
-export function estimateInputTokensFromMessages(messages: unknown): number {
-  if (!Array.isArray(messages)) return 0;
-
-  const totalChars = messages.reduce((sum: number, message: unknown) => {
-    const record = maybeJsonRecord(message);
-    return sum + estimateContentChars(record?.content);
-  }, 0);
-
-  return Math.ceil(totalChars / 4);
-}
-
-/**
- * Missing-usage estimate for a parsed passthrough request. Include system prompts, schemas,
- * names and structured tool history, not only message text. Serialized control fields add
- * small overhead; their numeric values never multiply the estimate. Measured usage wins.
- */
-export function estimateInputTokensFromRequest(body: Record<string, unknown>): number {
-  return Math.ceil(utf8ByteLength(JSON.stringify(body)) / 4);
-}
-
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
   format: TokenUsageFormat,
@@ -254,35 +253,44 @@ async function incrementExtractedUsage(
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
   const outputTokens =
     usage.outputTokens ??
-    (options.estimateMissingUsage ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
+    (estimatesMissingUsage(options) ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
-  await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
-  const model =
-    options.costModelId && hasLocalAiCostMetering(options.env)
-      ? findPricedModel(options.costModelId)
-      : null;
+  // Priced on every install. It is the spend record (display rows) without a gateway, and for a
+  // call that bypassed one. A gateway-routed call's price only backstops the gateway total
+  // (ai-cost-estimate.ts) and stays out of the display rows GET /api/usage/ai adds to it.
+  const localMetering = hasLocalAiCostMetering(options.env);
+  const samRecorded = localMetering || options.directUpstream === true;
+  const { model: pricedModel, costUsd } = priceReportedUsage(options.costModelId, {
+    anthropicFormat: options.format === 'anthropic',
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: usage.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+  });
+  const costEstimate = localMetering
+    ? undefined
+    : buildCostEstimateWrite(costUsd, options.directUpstream ? 'direct' : 'estimate');
+  await incrementTokenUsage(
+    options.env.KV,
+    options.userId,
+    inputTokens,
+    outputTokens,
+    options.env,
+    ...(costEstimate ? [costEstimate] : [])
+  );
+  const model = samRecorded ? pricedModel : null;
   const provider =
     options.provider ??
     (model
       ? { providerId: model.provider, providerName: model.provider, dialect: options.format }
       : undefined);
   if (provider) {
-    const cached = usage.cacheReadTokens ?? 0;
-    const writes = usage.cacheWriteTokens ?? 0;
-    const totalInput = options.format === 'anthropic' ? inputTokens + cached + writes : inputTokens;
-    const costUsd = model
-      ? priceModelUsageUsd(model, {
-          inputTokens: totalInput,
-          outputTokens,
-          cachedInputTokens: cached,
-          cacheWriteInputTokens: writes,
-        })
-      : 0;
+    const displayCostUsd = model ? costUsd : 0;
     const args = [options.env.KV, options.userId, provider, inputTokens, outputTokens] as const;
     // A priced call also records its catalog model (per-model breakdown without a gateway).
-    if (model) await incrementProviderUsage(...args, options.env, costUsd, model.id);
-    else if (options.costModelId) await incrementProviderUsage(...args, options.env, costUsd);
+    if (model) await incrementProviderUsage(...args, options.env, displayCostUsd, model.id);
+    else if (options.costModelId) await incrementProviderUsage(...args, options.env, 0);
     else await incrementProviderUsage(...args, options.env);
   }
   // Budget accounting is the billing control and runs first; run usage is telemetry and must
@@ -401,7 +409,6 @@ function applyStreamUsage(
   }
 }
 
-const UTF8 = new TextEncoder();
 function utf8ByteLength(text: string): number {
   return UTF8.encode(text).byteLength;
 }
@@ -459,18 +466,6 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? Math.floor(value)
     : undefined;
-}
-
-function estimateContentChars(content: unknown): number {
-  if (typeof content === 'string') return content.length;
-  if (!Array.isArray(content)) return 0;
-
-  return content.reduce((sum: number, part: unknown) => {
-    const record = maybeJsonRecord(part);
-    if (typeof record?.text === 'string') return sum + record.text.length;
-    if (typeof record?.content === 'string') return sum + record.content.length;
-    return sum;
-  }, 0);
 }
 
 function scheduleTokenAccounting(

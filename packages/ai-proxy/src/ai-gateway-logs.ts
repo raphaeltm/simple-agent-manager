@@ -252,7 +252,8 @@ export async function fetchGatewayLogs(
 
 /**
  * Iterate over all pages of AI Gateway logs for a given startDate,
- * calling `visitor` for each entry. Handles pagination automatically.
+ * calling `visitor` for each entry. Handles pagination automatically. Reports whether the page
+ * cap stopped the read before the oldest logs were reached.
  */
 export async function iterateGatewayLogs(
   env: AiProxyEnv,
@@ -261,8 +262,9 @@ export async function iterateGatewayLogs(
   startDate: string,
   visitor: (entry: AIGatewayLogEntry) => void,
   options: GatewayPaginationOptions = {}
-): Promise<void> {
+): Promise<{ truncated: boolean }> {
   const { pageSize, maxPages } = resolveGatewayPagination(env, options);
+  let truncated = false;
 
   for (let page = 1; page <= maxPages; page++) {
     const params = new URLSearchParams({
@@ -280,6 +282,8 @@ export async function iterateGatewayLogs(
     }
 
     if (page >= maxPages && resp.result_info.total_pages > maxPages) {
+      // Newest first (`order_by_direction: desc`), so a truncated read is missing the OLDEST logs.
+      truncated = true;
       log.warn('ai_gateway.logs_pagination_truncated', {
         maxPages,
         totalPages: resp.result_info.total_pages,
@@ -292,6 +296,7 @@ export async function iterateGatewayLogs(
       break;
     }
   }
+  return { truncated };
 }
 
 // ---------------------------------------------------------------------------
