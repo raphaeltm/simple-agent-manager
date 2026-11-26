@@ -137,12 +137,19 @@ export async function requireInstallationKeys(access: WorkerAccess): Promise<voi
   assertComplete(await inspectInstallationKeys(access), access.worker);
 }
 
-/** True when the installation's database has at least one user. */
+/**
+ * True when the installation's database has at least one real user. The `users` table always holds
+ * the `status = 'system'` sentinel row from migration 0043, which is not a person and cannot own
+ * encrypted data, so it is excluded (.claude/rules/40-sentinel-rows-excluded-from-counts.md).
+ */
+export const REAL_USER_EXISTS_SQL =
+  "SELECT 1 AS present FROM users WHERE status IS NOT 'system' LIMIT 1";
+
 async function databaseHasUsers(access: WorkerAccess, databaseId: string): Promise<boolean> {
   const result = await cloudflare(access, `d1/database/${databaseId}/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql: 'SELECT 1 AS present FROM users LIMIT 1' }),
+    body: JSON.stringify({ sql: REAL_USER_EXISTS_SQL }),
   });
   const rows = Array.isArray(result) ? (result[0] as { results?: unknown })?.results : undefined;
   if (!Array.isArray(rows)) throw new InstallationKeysError('Invalid database query result');

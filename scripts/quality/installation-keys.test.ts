@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
@@ -6,6 +7,7 @@ import { deriveDeploySigningPublicKey } from '../deploy/deploy-signing-keys';
 import {
   createInstallationKeys,
   inspectSecretListing,
+  REAL_USER_EXISTS_SQL,
   INSTALLATION_KEY_GROUPS,
   INSTALLATION_KEY_NAMES,
   InstallationKeysError,
@@ -37,11 +39,23 @@ function cloudflare(init: { names?: string[]; users?: number; failWrite?: boolea
           success: true,
           result: [...secrets.keys()].map((name) => ({ name, type: 'secret_text' })),
         });
-      if (url.endsWith('/d1/database/db/query'))
-        return Response.json({
-          success: true,
-          result: [{ results: Array.from({ length: init.users ?? 0 }, () => ({ present: 1 })) }],
-        });
+      if (url.endsWith('/d1/database/db/query')) {
+        // The real statement against a real SQLite users table that, like every installation's,
+        // holds migration 0043's system sentinel row.
+        const db = new DatabaseSync(':memory:');
+        db.exec('CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, status TEXT)');
+        db.exec(
+          "INSERT INTO users VALUES ('system_anonymous_trials', 'system@sam.invalid', 'system')"
+        );
+        for (let i = 0; i < (init.users ?? 0); i++)
+          db.prepare('INSERT INTO users VALUES (?, ?, ?)').run(
+            `u${i}`,
+            `u${i}@example.test`,
+            i % 2 ? 'pending' : 'active'
+          );
+        const { sql } = JSON.parse(String(requestInit?.body)) as { sql: string };
+        return Response.json({ success: true, result: [{ results: db.prepare(sql).all() }] });
+      }
       if (url.endsWith('/workers/scripts/sam-api-prod/secrets-bulk')) {
         const body = String(requestInit?.body);
         writes.push(body);
@@ -121,6 +135,13 @@ describe('installation keys', () => {
       );
     }
   );
+
+  it('a fresh database holding only the system sentinel row counts as having no users', async () => {
+    const world = cloudflare();
+    await expect(createInstallationKeys(world.access)).resolves.toBeUndefined();
+    expect(world.writes).toHaveLength(1);
+    expect(REAL_USER_EXISTS_SQL).toContain("status IS NOT 'system'");
+  });
 
   it('a failed write reports only its status, never the request or response body', async () => {
     const world = cloudflare({ failWrite: true });
