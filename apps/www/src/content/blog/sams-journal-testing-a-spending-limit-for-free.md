@@ -16,7 +16,7 @@ SAM runs AI coding agents (Claude Code, Codex and others) in cloud workspaces. A
 
 Because the proxy sees every call, it can meter them. It reads the token counts each response reports, prices them from SAM's model catalog, and records the cost per user. That makes two kinds of limit possible:
 
-- a **monthly spending limit** in dollars (set by an administrator, or by users for themselves), and
+- a **monthly spending limit** in dollars per user (a ceiling set by an administrator, or a lower cap users set for themselves), and
 - a **daily token budget**.
 
 When a user is over either one, the proxy refuses the call with HTTP `429` and a plain sentence such as `Administrator monthly AI spending limit reached`.
@@ -25,7 +25,7 @@ That is the theory. In practice this path had never been exercised end to end on
 
 ## A fake provider that still goes through the meter
 
-The obvious shortcut is to skip the provider and pretend a call cost something. That proves nothing, because the thing we want to test is the metering itself. So the fake (`ai-test-upstream.ts`, added in [#3009](https://github.com/raphaeltm/simple-agent-manager/pull/3009)) replaces exactly one step: the network call to the provider. Everything around it runs as usual: authentication, the model allowlist, both limits, and the accounting that prices the response afterwards.
+The obvious shortcut is to skip the provider and pretend a call cost something. That proves nothing, because the thing we want to test is the metering itself. So the fake (`ai-test-upstream.ts`, added in [#3009](https://github.com/raphaeltm/simple-agent-manager/pull/3009)) replaces one step: the call to the provider (and the platform-key lookup that goes with it). Everything around it runs as usual: authentication, the model allowlist, both limits, and the accounting that prices the response afterwards.
 
 ```mermaid
 flowchart TD
@@ -44,8 +44,10 @@ The fake answers in the same shape the real provider would (Anthropic Messages, 
 ```typescript title="apps/api/src/services/ai-test-upstream-responses.ts"
 export function fakeUsageForCost(modelId: string, costUsd: number): FakeUsage {
   const model = findPricedModel(modelId);
-  // ...unpriced models and very small costs are handled here (trimmed)
+  // ...unpriced models get a small fixed usage here (trimmed)
+  const target = Math.max(0, costUsd);
   const inputCostUsd = (FAKE_UPSTREAM_INPUT_TOKENS * model.costPer1kInputTokens) / 1000;
+  // ...a cost at or below the input price is all input tokens (trimmed)
   return {
     inputTokens: FAKE_UPSTREAM_INPUT_TOKENS,
     outputTokens: Math.round(((target - inputCostUsd) * 1000) / model.costPer1kOutputTokens),
@@ -70,11 +72,11 @@ When the fake answers, no platform key is resolved or sent, and nothing leaves t
 
 The Workers test sets a $1.00 limit and a cost of $0.40 per call. Calls one, two and three succeed. The fourth is refused with the administrator's spending-limit message, and the usage endpoint reports about $1.20 spent. The global `fetch` is never called.
 
-That $1.20 is worth noticing: the limit is checked before each call, so the last call that gets in can carry spending a little past the line.
+That $1.20 is worth noticing: the limit is checked before each call and the cost is recorded after it, so the last call that gets in can carry spending a little past the line. When calls run in parallel, more than one can get in, as the next section shows.
 
 ## The first thing the fake found
 
-Then the agent tried it on the self-host test box with a real chat: a coding agent, a tiny prompt ("reply with one word") and a limit already used up. The proxy refused the call, as designed. The chat said this:
+Then the agent tried it on the self-host test box with a real chat: a Claude Code session in SAM mode, a $1 limit and 40 cents per call. On the first prompt the agent replied with the fake's canned text, and the meter recorded four calls and $1.60. Two of those calls started at the same moment, before the cost of the one before them was written, so both got in. The second prompt was refused, as designed. The chat said this:
 
 <figure>
   <img class="shot-dark" src="/images/blog/sams-journal-testing-a-spending-limit-for-free/provider-overloaded-card-dark.png" width="326" height="73" alt="A failure card titled Provider overloaded, with a Recoverable badge, explaining that the LLM provider was temporarily overloaded or rate-limited the request." loading="lazy" decoding="async" />
@@ -102,7 +104,7 @@ Matching on message text is fragile, so it is fenced in three ways:
 
 - **It needs real 429 evidence too.** The sentence alone is not enough: the error must also be typed as a rate limit by the agent's adapter, or carry the adapter's `API Error: 429` prefix. Some other error that merely contains the sentence is not enough.
 - **It reads only the error message.** Other fields in the error, such as URLs and schemas, are ignored.
-- **The two sides are pinned together.** The sentences live in TypeScript (the proxy) and in Go (the agent). An API test reads the Go list and checks every proxy refusal still contains one of the markers, so rewording one side fails CI instead of silently bringing the old label back.
+- **The two sides are pinned together.** The sentences live in TypeScript (the proxy) and in Go (the agent). An API test reads the Go list and checks that the proxy's refusal builders still contain one of the markers, so rewording them fails CI instead of silently bringing the old label back.
 
 When it matches, the agent reports `sam_ai_usage_limit_reached`, does not retry, and the chat shows a card that says what actually happened:
 
