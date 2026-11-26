@@ -32,10 +32,10 @@ func TestExtractMessages_ToolName_FromMeta(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-1",
 				Title:      "Upload document to library",
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"},
-				},
-				RawInput: map[string]any{"filePath": "/tmp/auth-explainer.md", "directory": "/docs/"},
+				}),
+				RawInput: sdkFixtureJSON(map[string]any{"filePath": "/tmp/auth-explainer.md", "directory": "/docs/"}),
 			},
 		},
 	}
@@ -63,14 +63,14 @@ func TestExtractMessages_ToolCallUpdate_ToolNameAndRawOutput(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-1",
-				Status:     &status,
-				Meta: map[string]any{
+				Status:     acpsdk.PatchFromPtr(&status),
+				Meta: acpsdk.PatchSet(sdkFixtureMeta(map[string]any{
 					"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"},
-				},
+				})),
 				// The adapter sets rawOutput to the MCP content array.
-				RawOutput: []any{
+				RawOutput: acpsdk.PatchSet(sdkFixtureJSON([]any{
 					map[string]any{"type": "text", "text": `{"fileId":"f-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}`},
-				},
+				})),
 			},
 		},
 	}
@@ -139,9 +139,9 @@ func TestExtractMessages_RawField_SizeCap(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-4",
-				Status:     &status,
-				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}},
-				RawOutput:  []any{map[string]any{"type": "text", "text": huge}},
+				Status:     acpsdk.PatchFromPtr(&status),
+				Meta:       acpsdk.PatchSet(sdkFixtureMeta(map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}})),
+				RawOutput:  acpsdk.PatchSet(sdkFixtureJSON([]any{map[string]any{"type": "text", "text": huge}})),
 			},
 		},
 	}
@@ -167,9 +167,9 @@ func TestExtractMessages_RawField_ExactCap(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-exact",
-				Status:     &status,
-				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}},
-				RawOutput:  inner,
+				Status:     acpsdk.PatchFromPtr(&status),
+				Meta:       acpsdk.PatchSet(sdkFixtureMeta(map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}})),
+				RawOutput:  acpsdk.PatchSet(sdkFixtureJSON(inner)),
 			},
 		},
 	}
@@ -190,9 +190,9 @@ func TestExtractMessages_RawField_NonLibraryToolNotCaptured(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-bash",
 				Title:      "Bash: echo secret",
-				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
-				RawInput:   map[string]any{"command": "curl -H 'Authorization: Bearer sk-secret' https://x"},
-				RawOutput:  []any{map[string]any{"type": "text", "text": "ok"}},
+				Meta:       sdkFixtureMeta(map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}}),
+				RawInput:   sdkFixtureJSON(map[string]any{"command": "curl -H 'Authorization: Bearer sk-secret' https://x"}),
+				RawOutput:  sdkFixtureJSON([]any{map[string]any{"type": "text", "text": "ok"}}),
 			},
 		},
 	}
@@ -215,7 +215,7 @@ func TestExtractMessages_ToolName_MetaEmptyFallsToTitle(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-empty",
 				Title:      "mcp__sam-mcp__display_from_library",
-				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": ""}},
+				Meta:       sdkFixtureMeta(map[string]any{"claudeCode": map[string]any{"toolName": ""}}),
 			},
 		},
 	}
@@ -259,7 +259,7 @@ func TestExtractMessages_ToolName_CodexSlashTitle(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-codex",
 				Title:      "sam-mcp/display_from_library",
-				RawInput:   map[string]any{"fileId": "01KWV7J5N2Q1AGFTMQSNK1RE7B", "caption": "render test"},
+				RawInput:   sdkFixtureJSON(map[string]any{"fileId": "01KWV7J5N2Q1AGFTMQSNK1RE7B", "caption": "render test"}),
 			},
 		},
 	}
@@ -290,11 +290,11 @@ func TestExtractMessages_ToolCallUpdate_CodexSlash(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-codex",
-				Status:     &status,
-				Title:      &title,
-				RawOutput: []any{
+				Status:     acpsdk.PatchFromPtr(&status),
+				Title:      acpsdk.PatchFromPtr(&title),
+				RawOutput: acpsdk.PatchSet(sdkFixtureJSON([]any{
 					map[string]any{"type": "text", "text": `{"fileId":"f-9","filename":"arch.html","mimeType":"text/html","sizeBytes":15357}`},
-				},
+				})),
 			},
 		},
 	}
@@ -317,7 +317,7 @@ func TestExtractMessages_ToolName_CodexNonLibrarySlash(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-codex-list",
 				Title:      "sam-mcp/list_library_files",
-				RawInput:   map[string]any{"directory": "/docs/"},
+				RawInput:   sdkFixtureJSON(map[string]any{"directory": "/docs/"}),
 			},
 		},
 	}
@@ -340,7 +340,7 @@ func TestExtractMessages_ToolName_BareTitle(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tc-bare",
 				Title:      "display_from_library",
-				RawInput:   map[string]any{"fileId": "f-bare"},
+				RawInput:   sdkFixtureJSON(map[string]any{"fileId": "f-bare"}),
 			},
 		},
 	}

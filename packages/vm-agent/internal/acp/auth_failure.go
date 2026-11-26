@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -24,8 +25,8 @@ func ClassifyPromptError(err error) string {
 		if requestError.Code != -32603 {
 			return ""
 		}
-		data, ok := requestError.Data.(map[string]any)
-		if !ok {
+		var data map[string]any
+		if json.Unmarshal(requestError.Data, &data) != nil {
 			return ""
 		}
 		// codex-acp 1.13.1 attaches codexErrorInfo to terminal turn

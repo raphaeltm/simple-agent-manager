@@ -101,7 +101,10 @@ func steeringSupportFromInitialize(resp acpsdk.InitializeResponse) steeringSuppo
 		support.Adapter = resp.AgentInfo.Name
 		support.Version = resp.AgentInfo.Version
 	}
-	steering, _ := resp.Meta["steering"].(map[string]any)
+	var steering map[string]any
+	if resp.Meta.Get("steering", &steering) != nil {
+		return support
+	}
 	if supported, _ := steering["supported"].(bool); !supported {
 		return support
 	}

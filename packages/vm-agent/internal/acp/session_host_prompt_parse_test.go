@@ -51,7 +51,7 @@ func TestParsePromptBlocks_PreservesMetaAndAnnotations(t *testing.T) {
 	if tb.Meta == nil {
 		t.Fatal("Meta is nil — _meta was dropped by parse")
 	}
-	if got := tb.Meta["sam.origin"]; got != "system" {
+	if got := string(tb.Meta["sam.origin"]); got != `"system"` {
 		t.Fatalf("Meta[sam.origin] = %v, want system", got)
 	}
 	if tb.Annotations == nil {
@@ -108,7 +108,7 @@ func TestParsePromptBlocks_SkipsNonTextAndEmpty(t *testing.T) {
 	if first != "real" {
 		t.Fatalf("firstTextContent = %q, want real", first)
 	}
-	if blocks[0].Text == nil || blocks[0].Text.Meta["k"] != "v" {
+	if blocks[0].Text == nil || string(blocks[0].Text.Meta["k"]) != `"v"` {
 		t.Fatalf("surviving block lost its _meta: %+v", blocks[0].Text)
 	}
 }
@@ -121,7 +121,7 @@ func TestContentBlockMarshal_PreservesMetaAndAnnotations(t *testing.T) {
 	block := acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
 		Type:        "text",
 		Text:        "call get_instructions",
-		Meta:        map[string]any{"sam.origin": "system"},
+		Meta:        sdkFixtureMeta(map[string]any{"sam.origin": "system"}),
 		Annotations: &acpsdk.Annotations{Audience: []acpsdk.Role{acpsdk.RoleAssistant}, Priority: &priority},
 	}}
 
@@ -154,7 +154,7 @@ func TestInjectUserMessageNotifications_SDKMarshalPreservesMetadataAndSAMOrigin(
 	block := acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
 		Type:        "text",
 		Text:        "call get_instructions",
-		Meta:        map[string]any{"sam.origin": "system"},
+		Meta:        sdkFixtureMeta(map[string]any{"sam.origin": "system"}),
 		Annotations: &acpsdk.Annotations{Audience: []acpsdk.Role{acpsdk.RoleAssistant}},
 	}}
 
@@ -191,7 +191,7 @@ func TestInjectUserMessageNotifications_SDKMarshalPreservesMetadataAndSAMOrigin(
 		if tb == nil || tb.Text != "call get_instructions" {
 			t.Fatalf("mirror dropped the text itself: %+v", tb)
 		}
-		if tb.Meta["sam.origin"] != "system" {
+		if string(tb.Meta["sam.origin"]) != `"system"` {
 			t.Fatalf("mirror lost content metadata: %v", tb.Meta)
 		}
 		assertMirroredAssistantAudience(t, tb.Annotations)

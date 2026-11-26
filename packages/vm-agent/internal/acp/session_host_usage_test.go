@@ -131,14 +131,14 @@ func TestUsageReportFromClaudeRateLimitUsesStoredCredentialAttribution(t *testin
 				SessionUpdate: "usage_update",
 				Used:          50,
 				Size:          100,
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"_claude/rateLimit": map[string]any{
 						"status":        "allowed_warning",
 						"rateLimitType": "five_hour",
 						"utilization":   0.82,
 						"resetsAt":      "2026-09-07T12:00:00Z",
 					},
-				},
+				}),
 			},
 		},
 	})
@@ -275,7 +275,7 @@ func TestUsageReportSkipsContextUsageWithoutRateLimitMetadata(t *testing.T) {
 				SessionUpdate: "usage_update",
 				Used:          50,
 				Size:          100,
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"quota": map[string]any{
 						"_claude/rateLimit": map[string]any{
 							"status":        "allowed_warning",
@@ -283,7 +283,7 @@ func TestUsageReportSkipsContextUsageWithoutRateLimitMetadata(t *testing.T) {
 							"utilization":   0.82,
 						},
 					},
-				},
+				}),
 			},
 		},
 	})
@@ -318,13 +318,13 @@ func TestUsageReportConvertsClaudeNumericResetSecondsToMillis(t *testing.T) {
 				SessionUpdate: "usage_update",
 				Used:          50,
 				Size:          100,
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"_claude/rateLimit": map[string]any{
 						"status":        "allowed_warning",
 						"rateLimitType": "seven_day",
 						"resetsAt":      float64(1_700_100_000),
 					},
-				},
+				}),
 			},
 		},
 	})
@@ -1077,13 +1077,13 @@ func TestSessionUpdateUsesOriginatingACPConnectionCredentialAttribution(t *testi
 				SessionUpdate: "usage_update",
 				Used:          50,
 				Size:          100,
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"_claude/rateLimit": map[string]any{
 						"status":        "allowed_warning",
 						"rateLimitType": "five_hour",
 						"utilization":   0.82,
 					},
-				},
+				}),
 			},
 		},
 	}); err != nil {
@@ -1164,13 +1164,13 @@ func claudeRateLimitNotification(status, window string, utilization float64) acp
 				SessionUpdate: "usage_update",
 				Used:          50,
 				Size:          100,
-				Meta: map[string]any{
+				Meta: sdkFixtureMeta(map[string]any{
 					"_claude/rateLimit": map[string]any{
 						"status":        status,
 						"rateLimitType": window,
 						"utilization":   utilization,
 					},
-				},
+				}),
 			},
 		},
 	}

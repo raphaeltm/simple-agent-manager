@@ -14,12 +14,12 @@ func TestExtractMessages_Codex112CommandRawOutput(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "command-1",
-			Status:     &status,
-			RawInput:   map[string]any{"command": "printf secret-command-argument"},
-			RawOutput: map[string]any{
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawInput:   acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"command": "printf secret-command-argument"})),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{
 				"formatted_output": "SAM_COMMAND_OUTPUT_112\n",
 				"exit_code":        7,
-			},
+			})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -46,10 +46,10 @@ func TestExtractMessages_Codex112MCPResultAndSparseCorrelation(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "mcp-1",
-			Status:     &status,
-			RawOutput: map[string]any{"result": []any{
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"result": []any{
 				map[string]any{"type": "text", "text": "SAM_MCP_OUTPUT_112"},
-			}},
+			}})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -66,8 +66,8 @@ func TestExtractMessages_Codex112MCPError(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "mcp-error-1",
-			Status:     &status,
-			RawOutput:  map[string]any{"error": map[string]any{"message": "SAM_MCP_ERROR_112"}},
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawOutput:  acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"error": map[string]any{"message": "SAM_MCP_ERROR_112"}})),
 		},
 	}})
 	if msgs[0].Content != "Error: SAM_MCP_ERROR_112" {
@@ -80,9 +80,9 @@ func TestExtractMessages_UnknownRawOutputIsNotPersisted(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "unknown-1",
-			Status:     &status,
-			RawInput:   map[string]any{"token": "do-not-store"},
-			RawOutput:  map[string]any{"credential": "do-not-store"},
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawInput:   acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"token": "do-not-store"})),
+			RawOutput:  acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"credential": "do-not-store"})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -99,11 +99,11 @@ func TestExtractMessages_StructuredContentWinsOverRawFallback(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "structured-1",
-			Status:     &status,
-			Content: []acpsdk.ToolCallContent{{Content: &acpsdk.ToolCallContentContent{
+			Status:     acpsdk.PatchFromPtr(&status),
+			Content: acpsdk.PatchSet([]acpsdk.ToolCallContent{{Content: &acpsdk.ToolCallContentContent{
 				Content: acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{Text: "structured-wins"}},
-			}}},
-			RawOutput: map[string]any{"formatted_output": "fallback-loses", "exit_code": 0},
+			}}}),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"formatted_output": "fallback-loses", "exit_code": 0})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -120,11 +120,11 @@ func TestExtractMessages_TerminalReferencePreservedWithRawCommandOutput(t *testi
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "terminal-reference-1",
-			Status:     &status,
-			Content: []acpsdk.ToolCallContent{{Terminal: &acpsdk.ToolCallContentTerminal{
+			Status:     acpsdk.PatchFromPtr(&status),
+			Content: acpsdk.PatchSet([]acpsdk.ToolCallContent{{Terminal: &acpsdk.ToolCallContentTerminal{
 				TerminalId: "term-1",
-			}}},
-			RawOutput: map[string]any{"formatted_output": "terminal output survives", "exit_code": 0},
+			}}}),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"formatted_output": "terminal output survives", "exit_code": 0})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -142,18 +142,22 @@ func TestExtractMessages_TerminalReferencePreservedWithRawCommandOutput(t *testi
 func TestExtractMessages_MCPTraversalIsBoundedBeforeSerialization(t *testing.T) {
 	status := acpsdk.ToolCallStatusCompleted
 	large := strings.Repeat("界", maxToolContentSize)
-	cycle := map[string]any{}
-	cycle["content"] = cycle
+	// JSON cannot contain cycles. A deep wire value exercises the same depth
+	// bound without relying on an impossible SDK representation.
+	deep := map[string]any{"text": "must-not-reach-deep-value"}
+	for range 12 {
+		deep = map[string]any{"content": deep}
+	}
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "bounded-mcp-1",
-			Status:     &status,
-			RawOutput: map[string]any{"result": []any{
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"result": []any{
 				map[string]any{"credential": strings.Repeat("secret", maxToolContentSize)},
-				cycle,
+				deep,
 				map[string]any{"text": large},
 				map[string]any{"text": "must-not-overflow-budget"},
-			}},
+			}})),
 		},
 	}})
 	meta := unmarshalMeta(t, msgs)
@@ -176,13 +180,13 @@ func TestExtractMessages_MCPUnknownObjectIsUsefulAndRedacted(t *testing.T) {
 	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
 		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "object-mcp-1",
-			Status:     &status,
-			RawOutput: map[string]any{"result": map[string]any{
+			Status:     acpsdk.PatchFromPtr(&status),
+			RawOutput: acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"result": map[string]any{
 				"count":   3,
 				"items":   []any{map[string]any{"name": "alpha"}},
 				"token":   "bearer-secret",
 				"command": "cat /private/file",
-			}},
+			}})),
 		},
 	}})
 	content := msgs[0].Content

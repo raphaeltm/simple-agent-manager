@@ -43,9 +43,9 @@ func permissionRequest() acpsdk.RequestPermissionRequest {
 		SessionId: "acp-session",
 		ToolCall: acpsdk.ToolCallUpdate{
 			ToolCallId: "tool-call-1",
-			Title:      &title,
-			Kind:       &kind,
-			RawInput:   map[string]any{"secret": "must-not-cross-the-boundary"},
+			Title:      acpsdk.PatchFromPtr(&title),
+			Kind:       acpsdk.PatchFromPtr(&kind),
+			RawInput:   acpsdk.PatchSet(sdkFixtureJSON(map[string]any{"secret": "must-not-cross-the-boundary"})),
 		},
 		Options: []acpsdk.PermissionOption{
 			{OptionId: "reject", Name: "Reject", Kind: acpsdk.PermissionOptionKindRejectOnce},

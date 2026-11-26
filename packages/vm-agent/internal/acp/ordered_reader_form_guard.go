@@ -3,10 +3,10 @@ package acp
 import "encoding/json"
 
 // The pinned SDK decodes requestedSchema into a generated struct and discards
-// unknown root members. Preserve the fail-closed schema contract at the raw
+// unknown root and nested property members. Preserve the fail-closed schema contract at the raw
 // JSON-RPC boundary by turning unsupported forms into a schema the host will
-// explicitly cancel. Field-level constraints survive SDK decode and are
-// checked by validateAcpFormSchema in the callback.
+// explicitly cancel. Validate the original schema before typed SDK decoding
+// can erase a constraint; runtime-specific size limits are checked by the host.
 func guardRawElicitationSchema(line []byte, expectedSession string) []byte {
 	var envelope map[string]json.RawMessage
 	if json.Unmarshal(line, &envelope) != nil {
@@ -72,6 +72,25 @@ func guardRawElicitationSchema(line []byte, expectedSession string) []byte {
 	}
 	for key := range params {
 		if !allowedParams[key] {
+			unsupported = true
+		}
+	}
+	// Structural validation uses a ceiling derived from the already-bounded
+	// frame, so it cannot impose tighter size limits than the host's config.
+	// The callback still enforces the real per-session limits afterwards.
+	var original map[string]any
+	frameBound := len(line)
+	limits := acpFormLimits{properties: frameBound,
+		enum: frameBound, answerBytes: frameBound, stringBytes: frameBound,
+		keyChars: frameBound, labelChars: frameBound}
+	if json.Unmarshal(params["requestedSchema"], &original) != nil {
+		unsupported = true
+	} else {
+		// JSON re-encoding escapes HTML and Unicode separators. Measure the
+		// normalized bytes instead of imposing the raw frame's smaller byte size.
+		normalized, err := json.Marshal(original)
+		limits.schemaBytes = len(normalized)
+		if err != nil || !validateAcpFormSchema(original, limits) {
 			unsupported = true
 		}
 	}

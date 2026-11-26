@@ -182,11 +182,15 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		"previousAcpSessionID": previousAcpSessionID,
 	})
 	h.reportEvent("info", "agent.load_session", "Restoring previous conversation", map[string]interface{}{"previousAcpSessionID": previousAcpSessionID})
+	sessionMeta, metaErr := acpsdk.NewMeta(acpSessionMeta(agentType))
+	if metaErr != nil {
+		return false, fmt.Errorf("ACP session metadata: %w", metaErr)
+	}
 	loadResp, loadErr := h.acpConn.LoadSession(loadCtx, acpsdk.LoadSessionRequest{
 		SessionId:  acpsdk.SessionId(previousAcpSessionID),
 		Cwd:        h.config.ContainerWorkDir,
 		McpServers: buildAcpMcpServers(h.mcpServers(), agentType),
-		Meta:       acpSessionMeta(agentType),
+		Meta:       sessionMeta,
 	})
 	cancel()
 	if loadErr != nil {
@@ -226,10 +230,14 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 
 	slog.Info("ACP: sending NewSession request", "timeout", timeout)
 	h.reportLifecycle("info", "ACP NewSession started", map[string]interface{}{"agentType": agentType})
+	sessionMeta, err := acpsdk.NewMeta(acpSessionMeta(agentType))
+	if err != nil {
+		return fmt.Errorf("ACP session metadata: %w", err)
+	}
 	sessResp, err := h.acpConn.NewSession(newCtx, acpsdk.NewSessionRequest{
 		Cwd:        h.config.ContainerWorkDir,
 		McpServers: buildAcpMcpServers(h.mcpServers(), agentType),
-		Meta:       acpSessionMeta(agentType),
+		Meta:       sessionMeta,
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{

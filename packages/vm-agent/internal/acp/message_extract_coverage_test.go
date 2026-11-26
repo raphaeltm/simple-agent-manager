@@ -199,7 +199,7 @@ func TestExtractMessages_ToolCallUpdate_ContentOnly_Emitted(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-content-only",
-				Content: []acpsdk.ToolCallContent{
+				Content: acpsdk.PatchSet([]acpsdk.ToolCallContent{
 					{
 						Content: &acpsdk.ToolCallContentContent{
 							Content: acpsdk.ContentBlock{
@@ -207,7 +207,7 @@ func TestExtractMessages_ToolCallUpdate_ContentOnly_Emitted(t *testing.T) {
 							},
 						},
 					},
-				},
+				}),
 			},
 		},
 	}
@@ -233,8 +233,8 @@ func TestExtractMessages_ToolCallUpdate_WithKind(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-with-kind",
-				Kind:       &kind,
-				Status:     &status,
+				Kind:       acpsdk.PatchFromPtr(&kind),
+				Status:     acpsdk.PatchFromPtr(&status),
 			},
 		},
 	}
@@ -264,7 +264,7 @@ func TestExtractMessages_ToolCallUpdate_StatusOnly_FallbackContent(t *testing.T)
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-status-only",
-				Status:     &status,
+				Status:     acpsdk.PatchFromPtr(&status),
 			},
 		},
 	}
@@ -526,16 +526,16 @@ func TestExtractToolCallContents_MultipleDiffItems_Joined(t *testing.T) {
 
 func TestExtractMessages_ToolCallUpdate_WithLocations(t *testing.T) {
 	status := acpsdk.ToolCallStatusCompleted
-	line := 10
+	line := int64(10)
 	notif := acpsdk.SessionNotification{
 		SessionId: "sess-1",
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-locs",
-				Status:     &status,
-				Locations: []acpsdk.ToolCallLocation{
+				Status:     acpsdk.PatchFromPtr(&status),
+				Locations: acpsdk.PatchSet([]acpsdk.ToolCallLocation{
 					{Path: "/src/a.go", Line: &line},
-				},
+				}),
 			},
 		},
 	}

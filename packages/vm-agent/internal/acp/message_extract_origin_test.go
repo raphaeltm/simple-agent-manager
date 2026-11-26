@@ -16,7 +16,7 @@ func TestExtractMessages_UserOriginMarker(t *testing.T) {
 				Content: acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
 					Type: "text",
 					Text: "call get_instructions",
-					Meta: map[string]any{MetaOriginKey: OriginSystem},
+					Meta: sdkFixtureMeta(map[string]any{MetaOriginKey: OriginSystem}),
 				}},
 			},
 		},

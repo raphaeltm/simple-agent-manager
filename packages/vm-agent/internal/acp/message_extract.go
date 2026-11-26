@@ -100,12 +100,11 @@ func contentBlockOrigin(block acpsdk.ContentBlock) string {
 	if block.Text == nil {
 		return ""
 	}
-	if v, ok := block.Text.Meta[MetaOriginKey]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
+	var origin string
+	if block.Text.Meta.Get(MetaOriginKey, &origin) != nil {
+		return ""
 	}
-	return ""
+	return origin
 }
 
 // ToolMeta holds structured tool call metadata serialized as JSON into
@@ -124,7 +123,7 @@ type ToolMeta struct {
 	ToolName  string `json:"toolName,omitempty"`
 	Locations []struct {
 		Path string `json:"path,omitempty"`
-		Line *int   `json:"line,omitempty"`
+		Line *int64 `json:"line,omitempty"`
 	} `json:"locations,omitempty"`
 	// Content stores each ACP ToolCallContent block as raw JSON, preserving
 	// the exact wire format the frontend expects (including type discriminator,
@@ -221,7 +220,7 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
 				Path string `json:"path,omitempty"`
-				Line *int   `json:"line,omitempty"`
+				Line *int64 `json:"line,omitempty"`
 			}{Path: loc.Path, Line: loc.Line})
 		}
 		metaJSON, _ := json.Marshal(meta)
@@ -239,38 +238,46 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 
 	// Tool call update → role "tool" (status update)
 	if u.ToolCallUpdate != nil {
-		content := extractToolCallContents(u.ToolCallUpdate.Content)
-		normalized := normalizeRawToolOutput(u.ToolCallUpdate.RawOutput)
+		// ACP v1 tool-update nulls mean unchanged, like absent fields. Value/Ptr
+		// unwrap only set patches. Clear-only empty arrays retain the existing
+		// snapshot persistence behavior; this migration does not redesign merging.
+		updateContent, _ := u.ToolCallUpdate.Content.Value()
+		updateLocations, _ := u.ToolCallUpdate.Locations.Value()
+		updateMeta, _ := u.ToolCallUpdate.Meta.Value()
+		updateOutput, _ := u.ToolCallUpdate.RawOutput.Value()
+		updateInput, _ := u.ToolCallUpdate.RawInput.Value()
+		content := extractToolCallContents(updateContent)
+		normalized := normalizeRawToolOutput(updateOutput)
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
-			Content:    marshalRawContent(u.ToolCallUpdate.Content),
+			Content:    marshalRawContent(updateContent),
 		}
 		if content == "" && len(normalized.content) > 0 {
 			meta.Content = append(meta.Content, normalized.content...)
 			content = normalized.text
 		}
 		var updateTitle string
-		if u.ToolCallUpdate.Title != nil {
-			updateTitle = *u.ToolCallUpdate.Title
+		if u.ToolCallUpdate.Title.Ptr() != nil {
+			updateTitle = *u.ToolCallUpdate.Title.Ptr()
 		}
-		meta.ToolName = extractToolName(u.ToolCallUpdate.Meta, updateTitle)
+		meta.ToolName = extractToolName(updateMeta, updateTitle)
 		if toolNameNeedsRawCapture(meta.ToolName) {
-			meta.RawInput = marshalRawField(u.ToolCallUpdate.RawInput)
-			meta.RawOutput = marshalRawField(u.ToolCallUpdate.RawOutput)
+			meta.RawInput = marshalRawField(updateInput)
+			meta.RawOutput = marshalRawField(updateOutput)
 		}
-		if u.ToolCallUpdate.Title != nil {
-			meta.Title = *u.ToolCallUpdate.Title
+		if u.ToolCallUpdate.Title.Ptr() != nil {
+			meta.Title = *u.ToolCallUpdate.Title.Ptr()
 		}
-		if u.ToolCallUpdate.Kind != nil {
-			meta.Kind = string(*u.ToolCallUpdate.Kind)
+		if u.ToolCallUpdate.Kind.Ptr() != nil {
+			meta.Kind = string(*u.ToolCallUpdate.Kind.Ptr())
 		}
-		if u.ToolCallUpdate.Status != nil {
-			meta.Status = string(*u.ToolCallUpdate.Status)
+		if u.ToolCallUpdate.Status.Ptr() != nil {
+			meta.Status = string(*u.ToolCallUpdate.Status.Ptr())
 		}
-		for _, loc := range u.ToolCallUpdate.Locations {
+		for _, loc := range updateLocations {
 			meta.Locations = append(meta.Locations, struct {
 				Path string `json:"path,omitempty"`
-				Line *int   `json:"line,omitempty"`
+				Line *int64 `json:"line,omitempty"`
 			}{Path: loc.Path, Line: loc.Line})
 		}
 
@@ -358,7 +365,7 @@ func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
 // (delimiter-agnostic), or when it follows the legacy mcp__ convention. Scoping
 // the first branch to known tools avoids mistaking an arbitrary human title for
 // a tool identifier. Returns "" when nothing yields a name.
-func extractToolName(meta map[string]any, title string) string {
+func extractToolName(meta acpsdk.Meta, title string) string {
 	if name := extractToolNameFromMeta(meta); name != "" {
 		return name
 	}
@@ -378,11 +385,12 @@ func extractToolName(meta map[string]any, title string) string {
 // extractToolNameFromMeta returns only the adapter-supplied stable identifier.
 // Resource history uses this metadata-only path because an ACP title may contain
 // sensitive input such as the complete Bash command line.
-func extractToolNameFromMeta(meta map[string]any) string {
-	if cc, ok := meta["claudeCode"].(map[string]any); ok {
-		if name, ok := cc["toolName"].(string); ok && name != "" {
-			return name
-		}
+func extractToolNameFromMeta(meta acpsdk.Meta) string {
+	var cc struct {
+		ToolName string `json:"toolName"`
+	}
+	if meta.Get("claudeCode", &cc) == nil {
+		return cc.ToolName
 	}
 	return ""
 }
@@ -422,7 +430,7 @@ func marshalRawField(v any) json.RawMessage {
 		return nil
 	}
 	raw, err := json.Marshal(v)
-	if err != nil || len(raw) <= 2 || len(raw) > maxToolRawFieldSize {
+	if err != nil || string(raw) == "null" || len(raw) <= 2 || len(raw) > maxToolRawFieldSize {
 		return nil
 	}
 	return raw

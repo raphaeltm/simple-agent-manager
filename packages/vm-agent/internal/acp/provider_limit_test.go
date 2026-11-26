@@ -49,7 +49,7 @@ func TestProviderLimitActualClaudeGatewayFixture(t *testing.T) {
 func TestProviderLimitGatewayUnknownReset(t *testing.T) {
 	now := time.Date(2026, 8, 14, 5, 0, 0, 0, time.UTC)
 	for _, plan := range []string{"You've hit your session limit", "You've hit your weekly limit"} {
-		request := &acpsdk.RequestError{Code: -32603, Message: "Internal error: API Error: " + plan, Data: map[string]any{"errorKind": "rate_limit"}}
+		request := &acpsdk.RequestError{Code: -32603, Message: "Internal error: API Error: " + plan, Data: sdkFixtureJSON(map[string]any{"errorKind": "rate_limit"})}
 		limit := ClassifyProviderLimit(request, now)
 		if limit == nil || limit.ResetsAt != nil {
 			t.Fatal("typed SDK plan limit without a reset must enter bounded unknown-reset recovery")
@@ -71,7 +71,7 @@ func TestProviderLimitGatewayResetRequiresTypedProviderSource(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: tc.message, Data: tc.data}, now) != nil {
+			if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: tc.message, Data: sdkFixtureJSON(tc.data)}, now) != nil {
 				t.Fatal("untrusted reset escaped its provider source")
 			}
 		})
@@ -130,7 +130,7 @@ func TestProviderLimitRecordedWireThroughPromptCompletion(t *testing.T) {
 }
 func TestProviderLimitResetAndRetryControls(t *testing.T) {
 	now := time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC)
-	err := &acpsdk.RequestError{Code: -32603, Message: "You've hit your session limit · resets 1pm (UTC)", Data: map[string]any{"errorKind": "rate_limit"}}
+	err := &acpsdk.RequestError{Code: -32603, Message: "You've hit your session limit · resets 1pm (UTC)", Data: sdkFixtureJSON(map[string]any{"errorKind": "rate_limit"})}
 	limit := ClassifyProviderLimit(err, now)
 	if limit == nil || limit.ResetsAt == nil || *limit.ResetsAt != time.Date(2026, 10, 12, 13, 0, 0, 0, time.UTC).UnixMilli() {
 		t.Fatalf("wrong reset: %+v", limit)

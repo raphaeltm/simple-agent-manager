@@ -228,7 +228,7 @@ func TestLoopbackRejectionDoesNotReportMalformedWrapper(t *testing.T) {
 		{"missing URL variant", func(r *acpsdk.CreateElicitationRequest) { r.Url = nil }},
 		{"ambiguous form and URL", func(r *acpsdk.CreateElicitationRequest) { r.Form = &acpsdk.CreateElicitationForm{} }},
 		{"untrusted wrapper metadata", func(r *acpsdk.CreateElicitationRequest) {
-			r.Url.Meta = map[string]any{"token": "sk-secret-canary"}
+			r.Url.Meta = sdkFixtureMeta(map[string]any{"token": "sk-secret-canary"})
 		}},
 		{"empty elicitation ID", func(r *acpsdk.CreateElicitationRequest) { r.Url.ElicitationId = "" }},
 		{"oversize wrapper message", func(r *acpsdk.CreateElicitationRequest) {

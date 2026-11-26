@@ -44,8 +44,9 @@ func claudeRateLimitMeta(params acpsdk.SessionNotification) (map[string]any, boo
 	if !ok {
 		return nil, false
 	}
-	meta, ok := value.(map[string]any)
-	return meta, ok
+	var meta map[string]any
+	err := json.Unmarshal(value, &meta)
+	return meta, err == nil && meta != nil
 }
 
 func usageLimitFromClaudeRateLimit(meta map[string]any, observedAt int64) (usageLimitPayload, bool) {

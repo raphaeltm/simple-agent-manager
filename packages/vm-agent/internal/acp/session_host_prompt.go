@@ -327,7 +327,7 @@ func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, s
 		Prompt    []struct {
 			Type        string              `json:"type"`
 			Text        string              `json:"text"`
-			Meta        map[string]any      `json:"_meta,omitempty"`
+			Meta        acpsdk.Meta         `json:"_meta,omitempty"`
 			Annotations *acpsdk.Annotations `json:"annotations,omitempty"`
 		} `json:"prompt"`
 	}

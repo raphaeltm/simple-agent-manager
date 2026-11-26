@@ -248,10 +248,10 @@ func TestACPToolCallResourceHistoryUploadUsesMetadataWithoutTitleOrInput(t *test
 			Title:      commandCanary,
 			Kind:       acpsdk.ToolKindExecute,
 			Status:     acpsdk.ToolCallStatusInProgress,
-			RawInput:   map[string]any{"command": commandCanary},
-			Meta: map[string]any{
+			RawInput:   sdkFixtureJSON(map[string]any{"command": commandCanary}),
+			Meta: sdkFixtureMeta(map[string]any{
 				"claudeCode": map[string]any{"toolName": "Bash"},
-			},
+			}),
 		}},
 	})
 	if err != nil {
@@ -279,9 +279,9 @@ func TestACPToolCallResourceHistoryUploadUsesMetadataWithoutTitleOrInput(t *test
 		SessionId: "acp-session",
 		Update: acpsdk.SessionUpdate{ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 			ToolCallId: "tool-2",
-			Meta: map[string]any{
+			Meta: acpsdk.PatchSet(sdkFixtureMeta(map[string]any{
 				"claudeCode": map[string]any{"toolName": "Grep"},
-			},
+			})),
 		}},
 	})
 	if err != nil {
@@ -938,7 +938,7 @@ func notifyACPToolCall(t *testing.T, client *sessionHostClient, sessionID string
 				ToolCallId: acpsdk.ToolCallId(toolCallID),
 				Title:      title,
 				Status:     status,
-				RawInput:   rawInput,
+				RawInput:   sdkFixtureJSON(rawInput),
 			},
 		},
 	}); err != nil {
@@ -954,7 +954,7 @@ func notifyACPToolCallUpdate(t *testing.T, client *sessionHostClient, sessionID 
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: acpsdk.ToolCallId(toolCallID),
-				Status:     status,
+				Status:     acpsdk.PatchFromPtr(status),
 			},
 		},
 	}); err != nil {
