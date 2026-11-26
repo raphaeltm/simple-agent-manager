@@ -731,9 +731,10 @@ describe('installation engine', () => {
     );
     expect(
       f.commands.some(
-        (entry) => entry.executable === 'pulumi' && entry.args.join(' ') === 'preview --diff'
+        (entry) => entry.executable === 'pulumi' && entry.args.join(' ') === 'preview'
       )
     ).toBe(true);
+    expect(f.commands.some((entry) => entry.args.includes('--diff'))).toBe(false);
     expect(
       f.commands.some(
         (entry) =>

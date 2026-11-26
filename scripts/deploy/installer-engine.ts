@@ -314,7 +314,8 @@ export async function runInstallerEngine(
     })
   );
   if (c.dryRun) {
-    await phase('infrastructure-preview', () => pulumi('preview', '--diff'));
+    // No --diff: a diff that deletes or replaces a random.RandomId prints its id, the raw key.
+    await phase('infrastructure-preview', () => pulumi('preview'));
     state.status = 'completed';
     delete state.activePhase;
     await options.save(state);
