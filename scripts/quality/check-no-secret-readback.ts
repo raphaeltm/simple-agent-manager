@@ -323,6 +323,16 @@ function continuesChain(text: string, next: string, shell: boolean): boolean {
   return shell ? /^\s*(?:\?\.)?\[['"`]/.test(next) : /^\s*\[/.test(next);
 }
 
+/** `(` and `[` left open on a line, ignoring brackets inside quotes. */
+function openBrackets(text: string): number {
+  let depth = 0;
+  for (const char of text.replace(/(['"`])(?:\\.|(?!\1)[^\\])*\1/g, '')) {
+    if (char === '(' || char === '[') depth += 1;
+    else if (char === ')' || char === ']') depth -= 1;
+  }
+  return depth;
+}
+
 /** Physical lines a logical line may span, so a pathological file cannot make the scan quadratic. */
 const MAX_CONTINUATION_LINES = 20;
 
@@ -344,6 +354,9 @@ function logicalLine(
       text = `${text.replace(/\\\s*$/, '')} ${next.trim()}`;
     } else if (continuesChain(text, next, shell)) {
       text = `${text.trimEnd()}${next.trim()}`;
+    } else if (!shell && openBrackets(text) > 0) {
+      // A JS/TS call or array literal split across lines: `pulumi(\n  'stack',\n  'export'\n)`.
+      text = `${text.trimEnd()} ${next.trim()}`;
     } else {
       break;
     }

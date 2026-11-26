@@ -257,6 +257,19 @@ describe('check-no-secret-readback rules', () => {
 
 describe('statements split across lines', () => {
   it.each<[string, string, RuleId, number]>([
+    [
+      'x.ts',
+      "const state = await execute('pulumi', [\n  'stack',\n  'export',\n]);",
+      'state-export',
+      1,
+    ],
+    ['x.ts', "await pulumi(\n  'preview',\n  '--diff'\n);", 'state-export', 1],
+    [
+      'x.ts',
+      "const x = 1;\nawait run(\n  ['stack', '-s', name,\n   'export']\n);",
+      'state-export',
+      2,
+    ],
     ['x.ts', 'const plain = await crypto.subtle\n  .decrypt(params, key, data);', 'decryption', 1],
     ['x.ts', 'const plain = await crypto.subtle.\n  decrypt(params, key, data);', 'decryption', 1],
     [

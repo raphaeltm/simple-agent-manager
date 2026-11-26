@@ -75,30 +75,24 @@ describe('pulumi-stack-urns.sh', () => {
     expect(readFileSync(argsFile, 'utf8').trim()).toBe('stack --show-urns');
   });
 
-  it('fails, rather than reporting an empty stack, when Pulumi cannot read the stack', () => {
-    const { dir } = fakePulumi('echo "error: no stack selected" >&2; exit 255');
-    const result = run(dir);
+  it.each([
+    [
+      'Pulumi cannot read the stack (not an empty stack)',
+      'echo "error: no stack selected" >&2; exit 255',
+      'no stack selected',
+    ],
+    [
+      'the URNs found differ from the resource count Pulumi states',
+      'sed "/encryption-key$/d" "$FIXTURE"',
+      'stated: 4, URNs found: 3',
+    ],
+    ['the listing has no resource count header', 'grep "URN:" "$FIXTURE"', 'stated: none'],
+  ])('fails and prints no URNs when %s', (_case, body, reason) => {
+    const result = run(fakePulumi(body).dir);
 
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('no stack selected');
-  });
-
-  it('fails when the URNs it found do not match the resource count Pulumi states', () => {
-    const { dir } = fakePulumi('sed "/encryption-key$/d" "$FIXTURE"');
-    const result = run(dir);
-
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('stated: 4, URNs found: 3');
-  });
-
-  it('fails on a listing without the resource count header', () => {
-    const { dir } = fakePulumi('grep "URN:" "$FIXTURE"');
-    const result = run(dir);
-
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(reason);
   });
 
   it('prints nothing for a stack with no resources', () => {
