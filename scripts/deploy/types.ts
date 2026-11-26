@@ -296,9 +296,8 @@ export interface CloudflareWorker {
 // Do NOT add resource naming constants here - use DEPLOYMENT_CONFIG instead.
 //
 // These are required Cloudflare Worker secrets after deployment configuration
-// runs. Do not treat this list as the manual GitHub Environment prerequisite
-// list: the installation keys are created once, straight into the API Worker
-// (scripts/deploy/installation-keys.ts); configure-secrets.sh only checks them.
+// runs, not the manual GitHub Environment prerequisites: the installation keys are
+// created once in the API Worker (installation-keys.ts) and deploys only check them.
 // GitHub App/OAuth values are optional compatibility fallbacks because runtime
 // platform config can now provide them after first-run setup.
 
