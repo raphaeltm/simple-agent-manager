@@ -1,5 +1,14 @@
 /** The manual command enters the same populated-install recovery path as automatic rollback. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,6 +67,9 @@ beforeEach(() => {
     encryptionKeyFile: join(root, 'backup key'),
     log: vi.fn(),
     run: (command, args, env) => {
+      // The mode repair after each checkout (operator-files.ts): an empty index changes nothing.
+      if (args[1] === '--show-toplevel') return { status: 0, stdout: root, stderr: '' };
+      if (args[0] === 'ls-files') return { status: 0, stdout: '', stderr: '' };
       if (args[0] === 'status') return { status: 0, stdout: dirty ? ' M tracked' : '', stderr: '' };
       if (args[0] === 'rev-parse') return { status: 0, stdout: OPERATOR_REF, stderr: '' };
       steps.push(`${command} ${args.join(' ')}`);
@@ -139,6 +151,50 @@ describe('manual owned rollback', () => {
       expect(steps.filter((step) => step === 'OWNED_SNAPSHOT_RESTORE')).toHaveLength(2);
     }
   );
+
+  // Idea 01M89H1MQHJH432BFT2N43GHJJ: the manual rollback's checkout runs real git in a shell
+  // with umask 077 (as the operator's did). The previous ref's key agent sources must come back
+  // world-readable, including a directory the bad upgrade had left 0700.
+  it('restores git file modes when the previous ref is checked out under umask 077', async () => {
+    const repo = join(root, 'repo');
+    const keyAgent = join(repo, 'deploy/selfhost/key-agent');
+    mkdirSync(keyAgent, { recursive: true });
+    const git = (...args: string[]) => {
+      const r = spawnSync('sh', ['-c', 'umask 077; exec git "$@"', 'git', ...args], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      return { status: r.status ?? 1, stdout: r.stdout, stderr: r.stderr };
+    };
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'test');
+    writeFileSync(join(keyAgent, 'server.ts'), 'old\n', { mode: 0o644 });
+    git('add', '-A');
+    git('commit', '-qm', 'previous');
+    const previous = git('rev-parse', 'HEAD').stdout.trim();
+    writeFileSync(join(keyAgent, 'server.ts'), 'new\n');
+    git('add', '-A');
+    git('commit', '-qm', 'failed upgrade');
+    // The failed upgrade's checkout under umask 077: the file rewritten 0600, the directory 0700.
+    git('checkout', '-q', '--detach', 'HEAD~1');
+    git('checkout', '-q', '--detach', 'HEAD@{1}');
+    rmSync(keyAgent, { recursive: true });
+    git('checkout', '-q', '--', '.');
+    expect(statSync(keyAgent).mode & 0o777).toBe(0o700);
+    expect(statSync(join(keyAgent, 'server.ts')).mode & 0o777).toBe(0o600);
+    const runner = ctx.run;
+    ctx.run = (command, args, env) => {
+      if (command !== 'git') return runner(command, args, env);
+      if (args[0] === 'checkout') return git('checkout', '-q', '--detach', previous);
+      if (args[0] === 'ls-files' || args[1] === '--show-toplevel') return git(...args);
+      return runner(command, args, env);
+    };
+    await rollback();
+    expect(git('rev-parse', 'HEAD').stdout.trim()).toBe(previous);
+    expect(statSync(keyAgent).mode & 0o777).toBe(0o755);
+    expect(statSync(join(keyAgent, 'server.ts')).mode & 0o777).toBe(0o644);
+  });
 
   it('retries after dependency failure with the removed cache receipt still retained', async () => {
     const receipt = join(ctx.stateDir, 'rollback-cache-pending.json');

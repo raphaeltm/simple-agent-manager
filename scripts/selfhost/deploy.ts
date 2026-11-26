@@ -106,6 +106,7 @@ import {
   smtpWorkerVars,
   writeMailCollectorFiles,
 } from './mail-settings.js';
+import { useOperatorUmask } from './operator-files.js';
 import {
   assertSecretsKeepPlatformKeys,
   type PlatformKeysMode,
@@ -124,10 +125,7 @@ const API_DIR = join(REPO_ROOT, 'apps/api');
 /** Upper bound on captured celld output (bundle reports are a few KiB). */
 const CHILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 
-interface RunResult {
-  status: number;
-  output: string;
-}
+type RunResult = { status: number; output: string };
 
 /** Secret values scrubbed from any child output before it is printed. */
 let knownSecrets: string[] = [];
@@ -493,6 +491,7 @@ async function main(): Promise<void> {
 }
 
 try {
+  useOperatorUmask(); // operator-files.ts: children never inherit a restrictive umask
   await main();
 } catch (error: unknown) {
   console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);

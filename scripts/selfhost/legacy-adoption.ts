@@ -46,6 +46,7 @@ import {
   removeVolume,
   returnHelperName,
 } from './legacy-adoption-volumes';
+import { checkoutWithTrackedModes } from './operator-files';
 import { assertOperatorExecution } from './operator-only';
 import { readPrivateJson, replacePrivateFile } from './secret-files';
 import { readPendingFrom, UPGRADE_PENDING_FILE, upgradeCompletedTo } from './upgrade-journal';
@@ -96,6 +97,11 @@ function compose(ctx: BoxContext, args: string[], what: string): string {
 
 function git(ctx: BoxContext, args: string[], what: string): string {
   return check(ctx.run('git', args), what).stdout.trim();
+}
+
+/** `git checkout --detach`, making tracked files readable again (operator-files.ts). */
+function checkout(ctx: BoxContext, ref: string, what: string): void {
+  check(checkoutWithTrackedModes(ctx.run, ref, ctx.log), what);
 }
 
 function installationIdOf(stateDir: string): string {
@@ -453,8 +459,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
     ctx.log(`resuming legacy adoption at phase ${journal.phase}`);
     if (journal.rollingBack) {
       // Finish the interrupted rollback; never resume forward from a half-removed copy.
-      if (head !== journal.from)
-        git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
+      if (head !== journal.from) checkout(ctx, journal.from, 'check out --from');
       await rollbackToLegacy(ctx, opts, journal);
       throw new Error(
         'legacy adoption was rolled back after an interrupted rollback; rerun to retry'
@@ -471,7 +476,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
 
   if (!phaseAtLeast(journal, 'adopted')) {
     // The stack's bind mounts and compose files must be the deployed version while it moves.
-    if (head !== journal.from) git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
+    if (head !== journal.from) checkout(ctx, journal.from, 'check out --from');
     try {
       await adopt(ctx, opts, journal);
     } catch (error) {
@@ -486,7 +491,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
         // restarted, the journal is kept so the next run restarts it before anything else.
         if (journal.backupStarted) restartLegacyCelld(ctx, journal);
         clearAdoptionJournal(ctx.stateDir);
-        git(ctx, ['checkout', '--detach', journal.to], 'restore target checkout');
+        checkout(ctx, journal.to, 'restore target checkout');
       }
       throw error;
     }
@@ -501,7 +506,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
       !existsSync(pendingPath) &&
       git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD') !== journal.from
     )
-      git(ctx, ['checkout', '--detach', journal.from], 'check out --from');
+      checkout(ctx, journal.from, 'check out --from');
     const finished = journal;
     try {
       await opts.upgrade(withProject(ctx, journal.canonicalProject), {
@@ -524,7 +529,7 @@ export async function runLegacyAdoption(ctx: BoxContext, opts: AdoptionOptions):
   if (upgradeCompletedTo(ctx.stateDir, journal.to)) {
     // The deployed version is the target: the checkout follows it before the marker is cleared.
     if (git(ctx, ['rev-parse', 'HEAD'], 'git rev-parse HEAD') !== journal.to)
-      git(ctx, ['checkout', '--detach', journal.to], 'check out the upgraded target');
+      checkout(ctx, journal.to, 'check out the upgraded target');
     readPendingFrom(ctx.stateDir, journal.to);
   }
   clearAdoptionJournal(ctx.stateDir);

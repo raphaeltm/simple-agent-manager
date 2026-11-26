@@ -186,6 +186,51 @@ describe('FailureCard', () => {
     expect(screen.getByText('Recoverable')).toBeInTheDocument();
   });
 
+  // Idea 01M89JXTFHW4W3PQ65GTED6D0K: SAM's own usage limit is not a provider overload, and
+  // retrying in the same conversation cannot help until the limit changes.
+  it('shows the AI usage limit without a Recoverable badge or retry advice', async () => {
+    renderWithQuery(
+      <FailureCard
+        projectId="proj-1"
+        taskEmbed={makeTaskEmbed({
+          status: 'in_progress',
+          taskMode: 'conversation',
+          errorMessage: 'sam_ai_usage_limit_reached',
+          executionStep: 'sam_ai_usage_limit_reached',
+        })}
+        recoverable={true}
+      />
+    );
+
+    expect(screen.getByText('AI usage limit reached')).toBeInTheDocument();
+    expect(screen.queryByText('Provider overloaded')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recoverable')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(await screen.findByText(/Settings > Usage/)).toBeInTheDocument();
+    expect(screen.queryByText(/Send another message to retry/)).not.toBeInTheDocument();
+    expect(screen.getByText(/This session is still open. Fix the cause above/)).toBeInTheDocument();
+  });
+
+  it('control: a real provider overload still reads as recoverable', async () => {
+    renderWithQuery(
+      <FailureCard
+        projectId="proj-1"
+        taskEmbed={makeTaskEmbed({
+          status: 'in_progress',
+          taskMode: 'conversation',
+          errorMessage: 'provider_overloaded',
+          executionStep: 'provider_overloaded',
+        })}
+        recoverable={true}
+      />
+    );
+
+    expect(screen.getByText('Provider overloaded')).toBeInTheDocument();
+    expect(screen.getByText('Recoverable')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(await screen.findByText(/Send another message to retry/)).toBeInTheDocument();
+  });
+
   it('expands detail on click', async () => {
     renderWithQuery(
       <FailureCard

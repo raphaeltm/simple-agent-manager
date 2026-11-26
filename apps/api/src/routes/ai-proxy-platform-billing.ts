@@ -16,6 +16,7 @@ import {
   buildAIGatewayMetadata,
   updateAIProxyAgentCredentialAttribution,
 } from '../services/ai-proxy-shared';
+import { AI_TEST_UPSTREAM_ATTRIBUTION, type AiTestUpstream } from '../services/ai-test-upstream';
 import { attachTokenUsageAccounting } from '../services/ai-token-usage-accounting';
 import { recordProxyCredentialLimitObservationsFromHeaders } from '../services/credential-limit-events';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
@@ -49,8 +50,13 @@ export function buildProxyMetadata(
 
 export async function resolveOpenAIProxyCredential(
   c: AIProxyContext,
-  db: AIProxyDb
+  db: AIProxyDb,
+  testUpstream: AiTestUpstream | null = null
 ): Promise<OpenAIProxyCredential | Response> {
+  // The fake upstream needs no key, and none is read or sent (ai-test-upstream.ts).
+  if (testUpstream) {
+    return { apiKey: '', credentialProvider: 'openai', ...AI_TEST_UPSTREAM_ATTRIBUTION };
+  }
   if (resolveUnifiedBillingToken(c.env)) {
     return {
       apiKey: '',
