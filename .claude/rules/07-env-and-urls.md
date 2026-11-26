@@ -47,7 +47,7 @@ Do not ask users to supply platform-owned signing/encryption material when SAM c
 
 Examples:
 
-- **Installation keys** (`ENCRYPTION_KEY`, the JWT, VAPID and deploy-signing pairs, `PREVIEW_SIGNING_KEY`) are API Worker secrets only. `createInstallationKeys` (`scripts/deploy/installation-keys.ts`) creates them once, for a brand-new installation (no keys, no users), from the installer or an operator's machine, never CI. Nothing exports, displays or returns a key (Raphaël, 2026-11-26).
+- **Installation keys** (`ENCRYPTION_KEY`, the JWT, VAPID and deploy-signing pairs, `PREVIEW_SIGNING_KEY`) are API Worker secrets only. `createInstallationKeys` (`scripts/deploy/installation-keys.ts`) creates them once, for a brand-new installation (no keys, no users), from the installer or an operator's machine, never CI. Nothing exports, displays or returns a key.
 - Deploys never read, derive or write them: `configure-secrets.sh` checks their names and fails if one is missing. They are not Pulumi resources (a RandomId's id is its raw bytes); old stacks retire them by name (`scripts/deploy/retire-key-resources.ts`). A new deployment-owned secret follows the same shape.
 - `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs only. New VM nodes generate Origin CA private keys locally and fetch signed certificates through the node-scoped callback endpoint.
 

@@ -475,8 +475,8 @@ crons = ["* * * * *", "*/5 * * * *", "30 * * * *", "0 3 * * *"]
 # - JWT_PRIVATE_KEY
 # - JWT_PUBLIC_KEY
 # - ENCRYPTION_KEY
-# - BETTER_AUTH_SECRET (optional — overrides ENCRYPTION_KEY for BetterAuth sessions)
-# - CREDENTIAL_ENCRYPTION_KEY (optional — overrides ENCRYPTION_KEY for AES-GCM credential encryption)
+# - BETTER_AUTH_SECRET (optional, never created: set on the Worker directly — overrides ENCRYPTION_KEY for BetterAuth sessions)
+# - CREDENTIAL_ENCRYPTION_KEY (optional, never created: set on the Worker directly — overrides ENCRYPTION_KEY for AES-GCM credential encryption)
 # - DEPLOY_SIGNING_PRIVATE_KEY (Ed25519 signing key for deployment apply payloads)
 # - DEPLOY_SIGNING_PUBLIC_KEY (Ed25519 verification key for deployment apply payloads)
 # - PREVIEW_SIGNING_KEY (HMAC signing key for interactive preview URLs)
