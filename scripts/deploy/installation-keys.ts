@@ -22,6 +22,7 @@
  */
 import { randomBytes } from 'node:crypto';
 
+import { D1_LOCATIONS } from '../../apps/api/src/selfhost/key-rotation/d1-locations';
 import { generateDeploySigningKeyPair } from './deploy-signing-keys.js';
 import { isEntrypoint } from './entrypoint.js';
 import { generateEncryptionKey, generateKeyPair, generateVapidKeyPair } from './generate-keys.js';
@@ -155,15 +156,25 @@ export async function requireInstallationKeys(access: WorkerAccess): Promise<voi
 }
 
 /**
- * True when the installation's database holds a real user or a stored credential, either of which
- * means data may be encrypted under an earlier key. The `users` table always holds the
- * `status = 'system'` sentinel row from migration 0043, which is not a person and owns no data, so
- * it is excluded (.claude/rules/40-sentinel-rows-excluded-from-counts.md). No migration seeds
- * `credentials` or `platform_credentials`.
+ * True when the installation's database holds a real user, or any row of a table that stores
+ * ciphertext under an app key: either means data may be encrypted under an earlier key, so a new
+ * ENCRYPTION_KEY would make it unreadable. The tables come from the key-rotation registry
+ * (`D1_LOCATIONS`), which a test keeps complete: a table that gains an IV column fails it until it
+ * is listed. A partly restored database whose users are gone still has those rows, and is refused.
+ * The `users` table always holds the `status = 'system'` sentinel row from migration 0043, which
+ * is not a person and owns no data, so it is excluded
+ * (.claude/rules/40-sentinel-rows-excluded-from-counts.md). No migration seeds the cipher tables.
  */
 export const INSTALLATION_DATA_EXISTS_SQL =
-  "SELECT 1 AS present FROM users WHERE status IS NOT 'system' " +
-  'UNION ALL SELECT 1 FROM credentials UNION ALL SELECT 1 FROM platform_credentials LIMIT 1';
+  [
+    "SELECT 1 AS present FROM users WHERE status IS NOT 'system'",
+    ...[...new Set(D1_LOCATIONS.map((location) => location.table))]
+      .sort((a, b) => a.localeCompare(b))
+      .map((table) => {
+        if (!/^[a-z_]+$/.test(table)) throw new Error(`Unexpected table name ${table}`);
+        return `SELECT 1 FROM ${table}`;
+      }),
+  ].join(' UNION ALL ') + ' LIMIT 1';
 
 async function databaseHasData(access: WorkerAccess, databaseId: string): Promise<boolean> {
   const result = await cloudflare(access, `d1/database/${databaseId}/query`, {

@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
+import { D1_LOCATIONS } from '../../apps/api/src/selfhost/key-rotation/d1-locations';
 import { deriveDeploySigningPublicKey } from '../deploy/deploy-signing-keys';
 import {
   createInstallationKeys,
@@ -24,7 +25,14 @@ import {
 
 /** A Worker as Cloudflare holds it: secrets by name, a database that may have users. */
 function cloudflare(
-  init: { names?: string[]; users?: number; credentials?: boolean; failWrite?: boolean } = {}
+  init: {
+    names?: string[];
+    users?: number;
+    credentials?: boolean;
+    failWrite?: boolean;
+    /** A table that keeps a row though every user is gone (a partly restored database). */
+    orphanIn?: string;
+  } = {}
 ) {
   const secrets = new Map((init.names ?? []).map((name) => [name, 'existing'] as const));
   const writes: string[] = [];
@@ -47,9 +55,11 @@ function cloudflare(
         // holds migration 0043's system sentinel row.
         const db = new DatabaseSync(':memory:');
         db.exec('CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, status TEXT)');
-        db.exec('CREATE TABLE credentials (id TEXT PRIMARY KEY)');
-        db.exec('CREATE TABLE platform_credentials (id TEXT PRIMARY KEY)');
+        // Every table the key-rotation registry lists as holding ciphertext.
+        for (const table of new Set(D1_LOCATIONS.map((location) => location.table)))
+          db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY)`);
         if (init.credentials) db.exec("INSERT INTO platform_credentials VALUES ('pc1')");
+        if (init.orphanIn) db.exec(`INSERT INTO ${init.orphanIn} VALUES ('orphan')`);
         db.exec(
           "INSERT INTO users VALUES ('system_anonymous_trials', 'system@sam.invalid', 'system')"
         );
@@ -182,6 +192,18 @@ describe('installation keys', () => {
     await expect(createInstallationKeys(world.access, options)).rejects.toThrow(message);
     expect(world.writes).toEqual([]);
   });
+
+  // A partly restored database: ciphertext rows survive though no user or credential row does.
+  it.each([...new Set(D1_LOCATIONS.map((location) => location.table))])(
+    'refuses ENCRYPTION_KEY when %s still holds a row, though no user is left',
+    async (table) => {
+      const world = cloudflare({ orphanIn: table });
+      await expect(createInstallationKeys(world.access, fresh)).rejects.toThrow(
+        'already has users or credentials'
+      );
+      expect(world.writes).toEqual([]);
+    }
+  );
 
   it('a failed write reports only its status and error code, never a body', async () => {
     const world = cloudflare({ failWrite: true });
