@@ -329,24 +329,58 @@ export async function migrationsNewerThanSource(
   for (const alias of D1_MIGRATION_ALIAS_REPAIRS)
     if (alias.binding === access.binding && local.has(alias.currentName))
       local.add(alias.legacyName);
-  const query = await cloudflareResult(access, `d1/database/${access.databaseId}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql: 'SELECT name FROM d1_migrations ORDER BY id' }),
-  });
-  if (!query.found) throw new Error('Adopted database not found');
-  const rows = Array.isArray(query.result)
-    ? (query.result[0] as { results?: unknown } | undefined)?.results
-    : undefined;
-  if (!Array.isArray(rows)) throw new Error('Invalid database migration listing');
+  const rows = await databaseRows(access, 'SELECT name FROM d1_migrations ORDER BY id');
   return (rows as Array<{ name?: unknown }>)
     .map((row) => row?.name)
     .filter((name): name is string => typeof name === 'string' && !local.has(name));
 }
 
+/** The rows of one read-only statement against a deployed D1 database. */
+async function databaseRows(
+  access: CloudflareAccess & { databaseId: string },
+  sql: string
+): Promise<unknown[]> {
+  const query = await cloudflareResult(access, `d1/database/${access.databaseId}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  });
+  if (!query.found) throw new Error('Adopted database not found');
+  const rows = Array.isArray(query.result)
+    ? (query.result[0] as { results?: unknown } | undefined)?.results
+    : undefined;
+  if (!Array.isArray(rows)) throw new Error('Invalid database query result');
+  return rows;
+}
+
+/** `SYSTEM_USER_ID` in packages/shared/src/system-ids.ts: a sentinel row, never an owner. */
+const SYSTEM_USER_ID = 'system_anonymous_trials';
+
 /**
- * Takeover step 1, before anything changes: no deployed database may be newer than the approved
- * source, or this deploy would run older code on a newer schema.
+ * A takeover binds no owner and hands over no setup token, so the deployment must already have
+ * one: an active superadmin, the same test that closes first-run setup (`isSetupCompleted`,
+ * platform-config-core.ts). Without one its setup page is still open behind a token this deploy
+ * regenerates, and the installation service would tell the owner there is nothing to set up.
+ */
+async function refuseWithoutOwner(
+  access: CloudflareAccess & { databaseId: string }
+): Promise<void> {
+  const rows = await databaseRows(
+    access,
+    `SELECT COUNT(*) AS owners FROM users WHERE role = 'superadmin' AND status = 'active' AND id != '${SYSTEM_USER_ID}'`
+  );
+  const owners = (rows[0] as { owners?: unknown } | undefined)?.owners;
+  if (typeof owners !== 'number') throw new Error('Invalid database query result');
+  if (owners === 0)
+    throw new AdoptionRefused([
+      'This SAM has no active administrator, so its first-run setup is not finished. A takeover binds no owner and hands over no setup token. Finish setup on the existing deployment first, or install a new SAM instead.',
+    ]);
+}
+
+/**
+ * Takeover step 1, before anything changes: the deployment must have an owner, and no deployed
+ * database may be newer than the approved source, or this deploy would run older code on a newer
+ * schema.
  */
 export async function refuseRollback(
   access: CloudflareAccess & { root: string; stackOutputs(): Promise<string> }
@@ -361,6 +395,8 @@ export async function refuseRollback(
     if (databaseId === undefined && !ledger.required) continue;
     if (typeof databaseId !== 'string' || !/^[0-9a-f-]{36}$/.test(databaseId))
       throw new Error('Adopted stack has no database');
+    // The primary database holds the users.
+    if (ledger.required) await refuseWithoutOwner({ ...access, databaseId });
     const names = await migrationsNewerThanSource({ ...access, ...ledger, databaseId });
     newer.push(...names.map((name) => ledger.label + name));
   }

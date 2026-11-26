@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -1230,6 +1230,8 @@ describe('installation engine: adopting an existing deployment', () => {
     previewFailureTail?: string[];
     /** The deployed Worker's SETUP_FORCE var, when it has one. */
     setupForce?: string;
+    /** Active superadmins in the deployed database, not counting the system row. */
+    owners?: number;
   }
   /** fixture() with an existing deployment behind it: state, stack, database, Worker settings. */
   function adoptionFixture(world: AdoptionWorld = {}) {
@@ -1246,6 +1248,7 @@ describe('installation engine: adopting an existing deployment', () => {
     writeFileSync(join(f.root, 'apps/api/wrangler.toml'), '[vars]\nCONNECTOR_ENABLED = "false"\n');
     const requests: string[] = [];
     const previewOptions: Array<{ privateOutput?: boolean }> = [];
+    const ownerQueries: string[] = [];
     const runner: EngineRunner = {
       ...f.runner,
       async run(command, options) {
@@ -1317,15 +1320,24 @@ describe('installation engine: adopting an existing deployment', () => {
           });
         const ledger = (names: string[]) =>
           Response.json({ success: true, result: [{ results: names.map((name) => ({ name })) }] });
-        if (url.endsWith(`/d1/database/${databaseId}/query`))
+        if (url.endsWith(`/d1/database/${databaseId}/query`)) {
+          const sql = (JSON.parse(String(init?.body)) as { sql: string }).sql;
+          if (sql.includes('FROM users')) {
+            ownerQueries.push(sql);
+            return Response.json({
+              success: true,
+              result: [{ results: [{ owners: world.owners ?? 1 }] }],
+            });
+          }
           return ledger(world.applied ?? ['0001_init.sql']);
+        }
         if (url.endsWith(`/d1/database/${observabilityId}/query`))
           return ledger(world.observabilityApplied ?? ['0000_init.sql']);
         return f.runner.request(url, init);
       },
     };
     const lines = () => f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
-    return { ...f, runner, requests, lines, previewOptions };
+    return { ...f, runner, requests, lines, previewOptions, ownerQueries };
   }
   async function run(
     input: InstallerEngineConfig,
@@ -1604,6 +1616,27 @@ describe('installation engine: adopting an existing deployment', () => {
     for (const sync of syncs) expect(sync.env.SETUP_FORCE).toBeUndefined();
   });
 
+  it('refuses a takeover of a deployment that has no administrator yet', async () => {
+    // First-run setup was never finished: the setup page is open behind a token this deploy
+    // would regenerate, and a takeover binds no owner.
+    const f = adoptionFixture({ owners: 0 });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM has no active administrator, so its first-run setup is not finished. A takeover binds no owner and hands over no setup token. Finish setup on the existing deployment first, or install a new SAM instead.',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // The check counts active superadmins and leaves out the system row, as the app does.
+    expect(f.ownerQueries).toEqual([
+      "SELECT COUNT(*) AS owners FROM users WHERE role = 'superadmin' AND status = 'active' AND id != 'system_anonymous_trials'",
+    ]);
+    expect(
+      readFileSync(resolve(import.meta.dirname, '../../packages/shared/src/system-ids.ts'), 'utf8')
+    ).toContain("SYSTEM_USER_ID = 'system_anonymous_trials'");
+  });
+
   it('refuses a takeover when only the observability database is newer than the source', async () => {
     const f = adoptionFixture({ observabilityApplied: ['0000_init.sql', '0001_newer.sql'] });
     const { error, events } = await run(adopted, f);
@@ -1615,8 +1648,9 @@ describe('installation engine: adopting an existing deployment', () => {
     const calls = f.lines();
     for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
       expect(calls.some((line) => line.includes(step))).toBe(false);
-    // Both ledgers were read, so the primary one passing is what let this one decide.
-    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(2);
+    // The owner check and both ledgers were read, so the primary ledger passing is what let
+    // this one decide.
+    expect(f.requests.filter((line) => line.endsWith('/query'))).toHaveLength(3);
   });
 
   it('reads no observability ledger for a deployment that never had that database', async () => {
@@ -1628,7 +1662,9 @@ describe('installation engine: adopting an existing deployment', () => {
       events.some((event) => event.phase === 'adoption-preflight' && event.status === 'failed')
     ).toBe(false);
     expect(f.lines().some((line) => line.startsWith('pulumi preview --refresh --json'))).toBe(true);
+    // The owner check and the primary ledger; nothing against an observability database.
     expect(f.requests.filter((line) => line.endsWith('/query'))).toEqual([
+      expect.stringContaining(`/d1/database/${databaseId}/query`),
       expect.stringContaining(`/d1/database/${databaseId}/query`),
     ]);
   });

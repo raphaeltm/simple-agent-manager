@@ -345,3 +345,12 @@ deploy itself. The ones that change a deployment:
   it would keep an emergency switch on for good; dropping it silently could close setup under
   someone mid-recovery. The takeover now refuses in `adoption-preflight` while it is on
   (`refuseForcedSetup`), before reading the database ledgers or running any Pulumi command.
+
+## Review fixes, round 11 (2026-11-26, Codex review of d2f1c0412)
+
+- P2 "Preserve setup access for incomplete deployments": a deployment whose first-run setup was
+  never finished has no administrator, and its setup page is open behind a token the takeover
+  regenerates and does not hand over, while the service says there is nothing to set up. The
+  takeover now refuses it in `adoption-preflight` (`refuseWithoutOwner`: no active superadmin
+  other than the system row, the same test `isSetupCompleted` uses), which also keeps the install
+  policy that an instance is bound to an owner.
