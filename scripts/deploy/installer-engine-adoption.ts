@@ -38,7 +38,7 @@ function changedProperties(step: unknown): string[] | undefined {
   const diff = (step as { detailedDiff?: unknown } | null)?.detailedDiff;
   if (!diff || typeof diff !== 'object' || Array.isArray(diff)) return undefined;
   const roots = new Set(Object.keys(diff).map((path) => path.split(/[.[]/, 1)[0] ?? path));
-  return roots.size ? [...roots].sort() : undefined;
+  return roots.size ? [...roots].sort((a, b) => a.localeCompare(b)) : undefined;
 }
 
 /** Whether an update only replaces the Pages project's deployment records. */
@@ -139,19 +139,29 @@ export function refusedTakeoverSteps(preview: unknown): string[] {
     throw new Error('Invalid infrastructure preview');
   const refused: string[] = [];
   for (const step of (preview as { steps: unknown[] }).steps) {
-    const op = (step as { op?: unknown } | null)?.op;
-    if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
-    const urn = (step as { urn?: unknown }).urn;
-    if (TAKEOVER_UNCHANGING_OPERATIONS.has(op)) continue;
-    // Property names only: the diff's values can be resource state.
-    const changed = op === 'update' ? changedProperties(step) : undefined;
-    if (op === 'update' && isRoutinePagesUpdate(urn, changed)) continue;
-    const properties = changed
-      ? ` (changes: ${changed.slice(0, MAX_CHANGED_PROPERTIES).join(', ')}${changed.length > MAX_CHANGED_PROPERTIES ? ', …' : ''})`
-      : '';
-    refused.push(`${op} ${urnLabel(urn)}${properties}`);
+    const line = refusedTakeoverStep(step);
+    if (line) refused.push(line);
   }
   return refused;
+}
+
+/** The refusal line for one preview step, or undefined when a takeover may perform it. */
+function refusedTakeoverStep(step: unknown): string | undefined {
+  const op = (step as { op?: unknown } | null)?.op;
+  if (typeof op !== 'string') throw new Error('Invalid infrastructure preview');
+  if (TAKEOVER_UNCHANGING_OPERATIONS.has(op)) return undefined;
+  const urn = (step as { urn?: unknown }).urn;
+  if (op !== 'update') return `${op} ${urnLabel(urn)}`;
+  const changed = changedProperties(step);
+  if (isRoutinePagesUpdate(urn, changed)) return undefined;
+  return `${op} ${urnLabel(urn)}${changedSuffix(changed)}`;
+}
+
+/** The properties an update would change, by name only: the diff's values can be resource state. */
+function changedSuffix(changed: string[] | undefined): string {
+  if (!changed) return '';
+  const shown = changed.slice(0, MAX_CHANGED_PROPERTIES).join(', ');
+  return ` (changes: ${shown}${changed.length > MAX_CHANGED_PROPERTIES ? ', …' : ''})`;
 }
 
 interface CloudflareAccess {
