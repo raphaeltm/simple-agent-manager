@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 const API_URL = process.env.SMOKE_TEST_API_URL || 'https://api.sammy.party';
 

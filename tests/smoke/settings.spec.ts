@@ -1,10 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { loginWithToken } from './helpers/auth';
 
 test.describe('Settings', () => {
   test('settings page loads with tabs', async ({ context }) => {
     const page = await loginWithToken(context);
-    await page.goto(`${process.env.SMOKE_TEST_URL || 'https://app.sammy.party'}/settings/cloud-provider`);
+    await page.goto(
+      `${process.env.SMOKE_TEST_URL || 'https://app.sammy.party'}/settings/cloud-provider`
+    );
     await page.waitForLoadState('networkidle');
 
     // Settings page should show tab navigation

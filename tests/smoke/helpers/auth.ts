@@ -1,5 +1,7 @@
 import { type BrowserContext, type Page, expect } from '@playwright/test';
 
+import { deployCheckHeaders } from '../fixtures';
+
 /**
  * Authenticate a Playwright browser context using a smoke test token.
  *
@@ -32,7 +34,7 @@ export async function loginWithToken(
   // Call the token-login endpoint via context.request
   const response = await context.request.post(`${apiUrl}/api/auth/token-login`, {
     data: { token },
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...deployCheckHeaders() },
   });
 
   expect(response.ok(), `Token login failed: ${response.status()} ${await response.text()}`).toBe(

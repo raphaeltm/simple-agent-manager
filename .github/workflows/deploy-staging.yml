@@ -220,6 +220,8 @@ jobs:
       SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
       SMOKE_TEST_URL: https://app.${{ needs.lease.outputs.base_domain }}
       SMOKE_TEST_API_URL: https://api.${{ needs.lease.outputs.base_domain }}
+      # Optional: header for the zone's "SAM deploy checks" Cloudflare skip rule (tests/smoke/fixtures.ts).
+      DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
       SAM_PERFORMANCE_AUDIT: ${{ inputs.performance_audit && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -257,8 +259,10 @@ jobs:
         # runs there: on the primary a refused token must fail the smoke tests, not skip them.
         if: ${{ needs.lease.outputs.installation != '' && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
         run: |
+          # The deploy-check header (when configured) comes from a process-substitution file, not argv.
           status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
             curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
+              -H @<(if [ -n "${DEPLOY_CHECK_HEADER_VALUE:-}" ]; then printf 'x-sam-deploy-check: %s\n' "$DEPLOY_CHECK_HEADER_VALUE"; fi) \
               --data-binary @- "$SMOKE_TEST_API_URL/api/auth/token-login")" || status="request failed"
           # Only a refusal skips: any other failure (5xx, network) still runs the tests, which then
           # report the broken installation.

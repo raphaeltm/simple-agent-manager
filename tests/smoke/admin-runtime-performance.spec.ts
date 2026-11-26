@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 
-import { expect, test } from '@playwright/test';
+import { deployCheckHeaders, expect, test } from './fixtures';
 
 import { loginWithToken } from './helpers/auth';
 
@@ -21,7 +21,10 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
     waitUntil: 'domcontentloaded',
   });
   const session = await (
-    await page.request.get(`${api}/api/auth/get-session`, { timeout: auditTimeoutMs })
+    await page.request.get(`${api}/api/auth/get-session`, {
+      headers: deployCheckHeaders(),
+      timeout: auditTimeoutMs,
+    })
   ).json();
   expect(session.user.role, 'Performance audit requires the staging superadmin smoke account').toBe(
     'superadmin'
@@ -31,7 +34,10 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
     session.user.id
   );
   const projects = await (
-    await page.request.get(`${api}/api/projects?limit=1`, { timeout: auditTimeoutMs })
+    await page.request.get(`${api}/api/projects?limit=1`, {
+      headers: deployCheckHeaders(),
+      timeout: auditTimeoutMs,
+    })
   ).json();
   const projectId = projects.projects[0]?.id as string | undefined;
   expect(projectId, 'Performance audit requires an accessible staging project').toBeTruthy();
@@ -65,7 +71,10 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
         endpoints.slice(index, index + 3).map(async (path) => {
           const start = performance.now();
           try {
-            const response = await page.request.get(`${api}${path}`, { timeout: auditTimeoutMs });
+            const response = await page.request.get(`${api}${path}`, {
+              headers: deployCheckHeaders(),
+              timeout: auditTimeoutMs,
+            });
             await response.body();
             return {
               path,
