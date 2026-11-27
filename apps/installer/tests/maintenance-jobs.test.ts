@@ -478,3 +478,104 @@ it('shows the escaped engine output tail for a failed build under technical deta
   expect(html).toContain('&lt;script&gt;route already exists&lt;/script&gt;');
   expect(html).not.toContain('<script>route already exists');
 });
+
+describe('an installation service that took over an existing deployment', () => {
+  const adoption = { prefix: 'sam', environment: 'production', stateBucket: 'sam-pulumi-state' };
+  async function adopted() {
+    const f = await fixture();
+    const config = JSON.parse(f.env.INSTALLATION_CONFIG as string);
+    f.env.INSTALLATION_CONFIG = JSON.stringify({ ...config, adoption });
+    return f;
+  }
+
+  it('starts the takeover with the deployment’s own names, only after an unticked confirmation', async () => {
+    const f = await adopted();
+    const page = await (await f.request('/')).text();
+    expect(page).toContain('Ready to take over');
+    // Friction at the decision point: the takeover box is never pre-checked.
+    expect(page).toContain(
+      '<input name="confirmed" type="checkbox" value="yes" required> Check and take over'
+    );
+    expect((await f.request('/deploy', {})).status).toBe(409);
+    expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBe(303);
+    const start = f.calls.find((call) => call.path === '/start')!.body!;
+    expect(start).toMatchObject({
+      prefix: 'sam',
+      environment: 'production',
+      adoption: { stateBucket: 'sam-pulumi-state', takeover: true },
+    });
+    // The plan's naming record is not part of the engine job.
+    expect(JSON.stringify(start)).not.toContain('"adoption":{"prefix"');
+  });
+
+  it('offers no setup handoff, and its updates are not takeovers and need an adoption-capable release', async () => {
+    const f = await adopted();
+    await f.request('/deploy', { confirmed: 'yes' });
+    const initial = f.calls.find((call) => call.path === '/start')!.body!;
+    f.setJob({ status: 'completed', sourceCommit: original, jobId: initial.jobId });
+    const ready = await (await f.request('/')).text();
+    expect(ready).toContain('Takeover complete');
+    // It confirms only what a takeover keeps, and repeats what it reset.
+    expect(ready).toContain('Its data, keys and users are as they were.');
+    expect(ready).toContain(
+      'except container limits and web app build settings that your old deployment set in GitHub: those are now SAM defaults.'
+    );
+    expect(ready).not.toContain('settings and users are as they were');
+    expect(ready).toContain('href="https://app.sam.example.com"');
+    expect(ready).not.toContain('action="/setup"');
+    const setup = await f.request('/setup', {});
+    expect(setup.status).toBe(409);
+    expect(await setup.text()).not.toContain('private-setup-token-for-owner');
+
+    let protocol: Record<string, unknown> = { ...supportedProtocol };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/releases/latest')) return Response.json({ tag_name: 'v-next' });
+        if (url.endsWith('/commits/v-next')) return Response.json({ sha: updated });
+        if (url.endsWith('/scripts/deploy/installer-protocol.json')) return Response.json(protocol);
+        return supportedSourceFetch(input, init);
+      })
+    );
+    // A release whose engine predates adoption would ignore it and install a second SAM.
+    protocol = {
+      ...supportedProtocol,
+      capabilities: (supportedProtocol.capabilities as string[]).filter((c) => c !== 'adoption'),
+    };
+    const refused = await f.request('/update-preview', {});
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain('does not support this installer protocol');
+    protocol = { ...supportedProtocol };
+    const preview = await f.request('/update-preview', {});
+    const approval = /name="approval" value="([a-f0-9]{64})"/.exec(await preview.text())![1]!;
+    expect((await f.request('/update', { approval })).status).toBe(303);
+    const update = f.calls.filter((call) => call.path === '/start').at(-1)!.body!;
+    expect(update).toMatchObject({
+      sourceCommit: updated,
+      previousSourceCommit: original,
+      prefix: 'sam',
+      adoption: { stateBucket: 'sam-pulumi-state', takeover: false },
+    });
+  });
+
+  it('control: an ordinary installation keeps its derived names and setup handoff', async () => {
+    const f = await fixture();
+    await f.request('/deploy', { confirmed: 'yes' });
+    const start = f.calls.find((call) => call.path === '/start')!.body!;
+    expect(start.prefix).toMatch(/^s[a-f0-9]{6}$/);
+    expect(start.environment).toBe('production');
+    expect(start.adoption).toBeUndefined();
+  });
+
+  it('refuses a malformed takeover record instead of installing over it', async () => {
+    const f = await fixture();
+    const config = JSON.parse(f.env.INSTALLATION_CONFIG as string);
+    f.env.INSTALLATION_CONFIG = JSON.stringify({
+      ...config,
+      adoption: { ...adoption, prefix: 'Bad Prefix' },
+    });
+    expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBe(500);
+    expect(f.calls.some((call) => call.path === '/start')).toBe(false);
+  });
+});
