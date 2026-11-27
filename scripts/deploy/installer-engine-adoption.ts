@@ -473,8 +473,8 @@ export async function refuseResourceChanges(
 }
 
 /**
- * Every adopted deploy keeps what the deployment already runs with: its override vars, and its
- * key secrets (configure-secrets.sh leaves the names in PRESERVE_EXISTING_WORKER_SECRETS alone).
+ * Every adopted deploy keeps what the deployment already runs with: its override vars, and the
+ * secrets in PRESERVED_KEY_SECRETS (configure-secrets.sh leaves those names alone).
  */
 export async function keepAdoptedDeployment(
   env: NodeJS.ProcessEnv,

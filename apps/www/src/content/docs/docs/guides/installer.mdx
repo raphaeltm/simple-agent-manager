@@ -149,7 +149,8 @@ through the service.
    passes through the installer, which drops its copy at handoff, and is then kept only as a secret
    of the installation service in your account. A wrong passphrase stops the takeover at its first
    check, before it reads or changes your deployment (`refuseUnopenableState`). The passphrase
-   unlocks your deployment's keys, so enter it only at an installer you trust: check the address, or
+   opens your deploy state, which may still hold copies of your keys, so enter it only at an
+   installer you trust: check the address, or
    [host the installer yourself](#host-the-installer-yourself). The administrator email on the form
    is not used to change who administers your SAM; it is only shown on your installation service.
 3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its

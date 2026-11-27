@@ -35,6 +35,9 @@ Code read on origin/main f49ee4017 (nothing run yet).
    secrets, so it would replace an overridden `ENCRYPTION_KEY` with Pulumi's generated one: every
    stored credential unreadable, every session invalid, and GitHub secrets cannot be read back to
    recover. Adoption must leave existing key-material Worker secrets in place.
+   *(Superseded 2026-11-27 by #3019: no deploy reads or writes installation keys any more, so
+   this holds by construction; the preservation list is down to `VAPID_SUBJECT`. See "Merge of
+   main with the installation-keys change".)*
 6. **Other Worker secrets survive by themselves.** `set_worker_secret` skips empty optional values
    (`configure-secrets.sh:182-189`), and `wrangler deploy` does not remove secrets, so GitHub-App,
    OAuth and similar secrets set by the fork's workflow stay as they are.
@@ -80,7 +83,8 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
      (named in the failure tail), immediately before `pulumi up` in the same job;
   3. carry the deployed Worker's override vars into sync;
   4. leave existing key-material Worker secrets in place (only set ones that are absent), for this
-     job and every later update of an adopted installation;
+     job and every later update of an adopted installation *(since #3019 no deploy writes them at
+     all)*;
   5. do not set `BOOTSTRAP_OWNER_EMAIL`, and skip the setup-token handoff;
   6. (Superseded) deploy the installer's approved source; the rollback guard refuses when the
      deployment is newer, and the preview gate refuses any resource change. The owner updates
@@ -94,7 +98,8 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
 - [x] Engine: preview gate (`pulumi preview --json`, classify `changeSummary`/steps; refuse
       create/replace/delete), with tests on real preview JSON shapes
 - [x] Engine: carry deployed override vars (exported optional-var list from sync-wrangler-config)
-- [x] configure-secrets: preserve existing key-material secrets when asked; tests
+- [x] configure-secrets: preserve existing key-material secrets when asked; tests *(after #3019
+      only `VAPID_SUBJECT` needs it; installation keys are never written)*
 - [x] Engine: no `BOOTSTRAP_OWNER_EMAIL`, no owner-handoff in adoption
 - [x] Builder: accept and validate adoption job fields; pass passphrase as before
 - [x] Maintenance: adoption manifest, "Take over" action and panel text; updates keep adoption
@@ -104,7 +109,8 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
       → engine (fake runner) for adoption, plus refusal cases
 - [x] Docs: installer guide section "Move an existing SAM to the installer"; self-hosting guide
       pointer; security architecture notes (passphrase custody, preserved keys)
-- [ ] Proof on the agreed target (see Open decision); record evidence
+- [ ] Proof on the agreed target (see Open decision); record evidence. **Waived by Raphaël on
+      2026-11-27 ("1": merge without a live takeover run). No live takeover has been run.**
 
 ## Acceptance criteria
 
@@ -114,10 +120,15 @@ Adoption is a mode of the existing installation flow, not a parallel implementat
 - [x] Existing `ENCRYPTION_KEY`/JWT/signing/VAPID Worker secrets are unchanged after adoption and
       after a later update
 - [x] Deployed override vars are unchanged after adoption
-- [x] Existing users can still sign in after adoption (no owner-email lockout) — unit-covered; live proof pending
-- [ ] A real existing deployment is adopted, then updated, through the installation service
+- [x] Existing users can still sign in after adoption (no owner-email lockout) — unit-covered; the
+      live proof was waived (see above)
+- [ ] A real existing deployment is adopted, then updated, through the installation service.
+      **Not done: waived by Raphaël on 2026-11-27; the first real takeover is to be watched.**
 
 ## Open decision (Raphaël)
+
+*Closed 2026-11-27: he chose to merge without a live takeover run. The options below are kept
+as history.*
 
 Proof target, because staging2 shares staging's state and passphrase (finding 10):
 - a disposable test deployment on a spare apex domain, created once the old way then adopted
@@ -152,7 +163,8 @@ Proof target, because staging2 shares staging's state and passphrase (finding 10
   unset) → engine sets `AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET=true` for adoption; tested + proven red.
 - Security: `pulumi refresh --yes` ran before the gate → gate now uses `pulumi preview --refresh
   --json` before the refresh; refused takeover asserts no refresh ran.
-- Security: key pairs preserved together (JWT, VAPID, deploy signing).
+- Security: key pairs preserved together (JWT, VAPID, deploy signing). *(Removed again after
+  #3019: no deploy writes installation keys.)*
 - Security: deployed vars equal to the source's `[vars]`/code default are not carried (would pin
   old defaults).
 - Security: installer session drops the passphrase at handoff; page copy and docs say it passes
@@ -431,3 +443,7 @@ Fix (wording): the completion panel confirms data, keys and users, says settings
 
 - 11:25Z, on the settings-handover question: "Merge this. We only have one other real user, I think. We can manually help him move if necessary." The handover is built after the merge.
 - 12:38Z, on "merge without ever running a real takeover, or test one first?": "1", merge without a live takeover run. The first real takeover is done later with someone watching. The ordinary staging deploy of this branch is still required before merge.
+
+## Completion validation, 2026-11-27 (head cf293f953)
+
+task-completion-validator re-run: no CRITICAL or HIGH. Code and tests pass (engine 237, installer 177); every test named in the review-round sections exists; the preflight and infrastructure order matches the guide; the three takeover form fields reach `previewAdoption`. Its MEDIUM and LOW findings were stale wording, fixed in the next commit: the live-proof items above are marked waived, the pre-#3019 key statements are annotated, the `keepAdoptedDeployment` comment no longer speaks of key secrets, and the guide, the security note and the form say the passphrase opens the deploy state, which may still hold key copies, instead of saying it unlocks the keys. Research finding 12 (rebase after #2993): #2993 had not merged when this was written; nothing to rebase onto.
