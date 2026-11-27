@@ -485,7 +485,30 @@ async function auditTakeoverPanel(
     });
   });
   expect(inside).toBe(true);
-  const count = await captureState(page, 'maintenance-takeover-ready');
+  let count = await captureState(page, 'maintenance-takeover-ready');
+  // The finished takeover, with the same long names: it confirms only what a takeover keeps and
+  // repeats what it reset.
+  const config = JSON.parse(env.INSTALLATION_CONFIG as string) as { sourceCommit: string };
+  storage.set('installation', {
+    config,
+    sourceMode: 'upstream',
+    createdAt: Date.now(),
+    lastSuccessfulCommit: config.sourceCommit,
+  });
+  await page.goto(target);
+  await expect(page.getByRole('heading', { name: 'Takeover complete' })).toBeVisible();
+  await expect(page.locator('.ready-lede')).toHaveText(
+    'This service now builds and updates the SAM that was already running here. Its data, keys and users are as they were. The settings it ran with were kept, except container limits and web app build settings that your old deployment set in GitHub: those are now SAM defaults.'
+  );
+  const completeInside = await page.locator('section.deployment').evaluate((card) => {
+    const box = card.getBoundingClientRect();
+    return [...card.querySelectorAll('h1, p, a')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.left >= box.left - 1 && r.right <= box.right + 1;
+    });
+  });
+  expect(completeInside).toBe(true);
+  count += await captureState(page, 'maintenance-takeover-complete');
   env.INSTALLATION_CONFIG = installation;
   storage.delete('installation');
   return count;

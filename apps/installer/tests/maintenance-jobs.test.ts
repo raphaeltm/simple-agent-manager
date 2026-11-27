@@ -515,6 +515,12 @@ describe('an installation service that took over an existing deployment', () => 
     f.setJob({ status: 'completed', sourceCommit: original, jobId: initial.jobId });
     const ready = await (await f.request('/')).text();
     expect(ready).toContain('Takeover complete');
+    // It confirms only what a takeover keeps, and repeats what it reset.
+    expect(ready).toContain('Its data, keys and users are as they were.');
+    expect(ready).toContain(
+      'except container limits and web app build settings that your old deployment set in GitHub: those are now SAM defaults.'
+    );
+    expect(ready).not.toContain('settings and users are as they were');
     expect(ready).toContain('href="https://app.sam.example.com"');
     expect(ready).not.toContain('action="/setup"');
     const setup = await f.request('/setup', {});

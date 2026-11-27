@@ -420,3 +420,14 @@ Fix: `existingBuckets` (`apps/installer/src/adoption-plan.ts`) skips a name `BUC
 Finding: every deploy deletes the `STALE_SECRETS` (`configure-secrets.sh`), among them `AI_PROXY_ENABLED` and `AI_PROXY_DEFAULT_MODEL`, which older releases kept as Worker secrets before they became vars. A deployment that still holds one runs on a value the takeover cannot read; deleting it would swap that value for the source's default, outside the gates. Valid.
 
 Fix: `refuseShadowedSettings` (`installer-engine-adoption.ts`) refuses the takeover in `adoption-preflight` while the Worker holds either name, and tells the owner to update once the old way first (a fork deploy sets the var from its own settings). The two retired trial secrets shadow nothing and do not stop a takeover. Test: `refuses a takeover of a deployment that keeps a setting only as a legacy secret` (refusal text, no later step, parity with the script's `STALE_SECRETS`, retired-secret control). Mutation: call removed, test red.
+
+## Codex round 17 (on 181532b57): the completion panel claimed every setting survived
+
+Finding: "Takeover complete … Its data, keys, settings and users are as they were" is false when the old deployment set container limits or web app build settings in GitHub, which a takeover resets. Valid; the review row said the same.
+
+Fix (wording): the completion panel confirms data, keys and users, says settings were kept and names the two kinds that are now SAM defaults; the review's "Takes over" row says the same. `maintenance-jobs.test.ts` pins the panel text, and the browser audit gained a `maintenance-takeover-complete` state with long names (162 screenshots, no overflow).
+
+## Raphaël's decisions, 2026-11-27
+
+- 11:25Z, on the settings-handover question: "Merge this. We only have one other real user, I think. We can manually help him move if necessary." The handover is built after the merge.
+- 12:38Z, on "merge without ever running a real takeover, or test one first?": "1", merge without a live takeover run. The first real takeover is done later with someone watching. The ordinary staging deploy of this branch is still required before merge.
