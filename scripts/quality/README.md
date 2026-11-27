@@ -231,10 +231,20 @@ a split statement counts: shell `\` continuations in every file type, and JS/TS 
 (`crypto.subtle` followed by `.decrypt(` on the next line) are joined. A finding is reported at the
 statement's first line.
 
-It reports four kinds of finding:
+It reports five kinds of finding:
 
 - `show-secrets`: `--show-secrets`, any `showSecrets` other than `showSecrets: false`, and
   `pulumi config get`.
+- `state-export`: `pulumi stack export` (flags anywhere on the command, `$PULUMI`-style binaries,
+  and argument lists such as `pulumi('stack', 'export')`), `--show-ids`, the Automation API's
+  `exportStack(`, and any Pulumi `--diff`. A `random.RandomId`'s resource id is its raw generated
+  bytes, in plain text in state: an export or `--show-ids` puts it in the runner, and a diff that
+  deletes or replaces the resource prints it. List resources with
+  `scripts/deploy/pulumi-stack-urns.sh` instead. A marker cannot excuse this rule. Added
+  2026-11-26. On that tree (346 files, 68,104 lines) it reported the nine `pulumi stack export`
+  calls in `teardown.yml` and `pulumi-state-repair.yml`, the dry-run `pulumi preview --diff` in
+  `deploy-reusable.yml`, `pulumi-state-repair.yml` and `installer-engine.ts`, all changed in the
+  same PR, and nothing else.
 - `decryption`: `subtle.decrypt(` or `subtle['decrypt'](`, `createDecipher(iv)(`,
   `require(...).decrypt*`, and any import, re-export or dynamic import that names `decrypt*` or
   loads the API's `services/encryption` module, including multi-line imports and inline JS in
@@ -258,8 +268,8 @@ A legacy line that cannot go yet is accepted only when all of these hold:
 - the task is still open, under `tasks/backlog/` or `tasks/active/`.
 
 A marker that fails any of these makes the line a finding, and the marker itself is reported.
-Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets.sh`, tracked by
-`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
+The list lives in `scripts/quality/secret-readback-allowlist.json`. Since 2026-11-26 it is empty: `scripts/deploy/configure-secrets.sh` no longer reads
+installation keys back from Pulumi (they live only in the API Worker, `scripts/deploy/installation-keys.ts`).
 Every value that read returns is masked before any other use.
 
 It runs in the Secret Scan job, which has no path filter, so every pull request and every

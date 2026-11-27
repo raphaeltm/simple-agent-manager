@@ -1,3 +1,8 @@
+// The usage gate reads the installation ceiling on every install (gateway included).
+vi.mock('../../../src/services/admin-settings-resolution', () => ({
+  resolveAdminSetting: vi.fn(async () => 600),
+  resolveAdminSettingDetails: vi.fn(async () => ({ value: 0 })),
+}));
 vi.mock('../../../src/services/platform-capabilities', async (original) => ({
   ...(await original<typeof import('../../../src/services/platform-capabilities')>()),
   resolveLlmEndpointCapability: async () => null,

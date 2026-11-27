@@ -1,4 +1,4 @@
-import { type MonthlyCostCapCheck,monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
+import { type MonthlyCostCapCheck, monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
 /**
  * Error shapes and platform-credential telemetry for the native Anthropic proxy
  * (`routes/ai-proxy-anthropic.ts`).
@@ -120,8 +120,12 @@ async function recordAnthropicPlatformLimitHeaders(input: {
 
 export function scheduleAnthropicPlatformLimitHeaders(
   c: AnthropicProxyContext,
-  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0]
+  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0] & {
+    /** A faked call (ai-test-upstream.ts) used no real credential: nothing to record. */
+    testUpstream?: boolean;
+  }
 ): void {
+  if (input.testUpstream) return;
   const telemetry = recordAnthropicPlatformLimitHeaders(input).catch((error) => {
     log.warn('ai_proxy_anthropic.credential_limit_telemetry_failed', {
       userId: input.auth.userId,

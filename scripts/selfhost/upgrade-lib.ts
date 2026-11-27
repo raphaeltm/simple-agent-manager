@@ -23,6 +23,7 @@ import { loadBoxEnv } from './box-settings.js';
 import { composeFilesFor } from './compose-env.js';
 import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
+import { checkoutWithTrackedModes } from './operator-files.js';
 import { assertOperatorExecution } from './operator-only.js';
 import { recoverRollbackState } from './rollback-state.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
@@ -191,7 +192,7 @@ export async function recoverUpgrade(
     join(ctx.stateDir, UPGRADE_PENDING_FILE),
     `${JSON.stringify({ from, backupDir, ...(to ? { to } : {}) })}\n`
   );
-  check(ctx.run('git', ['checkout', '--detach', from]), 'restore previous checkout');
+  check(checkoutWithTrackedModes(ctx.run, from, ctx.log), 'restore previous checkout');
   check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
   const stateDir = composeStateDirOverride(ctx);
   const env = stateDir === null ? undefined : { ...process.env, SAM_SELFHOST_STATE_DIR: stateDir };
@@ -273,7 +274,6 @@ interface UpgradeProgress {
 async function applyUpgrade(
   ctx: BoxContext,
   opts: UpgradeOptions,
-  git: Git,
   plan: UpgradePlan,
   progress: UpgradeProgress
 ): Promise<boolean> {
@@ -286,7 +286,7 @@ async function applyUpgrade(
       ctx.run('docker', composeArgs(ctx, args), composeEnv),
       `docker compose ${args.join(' ')}`
     );
-  git(['checkout', '--detach', plan.to]);
+  check(checkoutWithTrackedModes(ctx.run, plan.to, ctx.log), `check out ${plan.to}`);
   pnpm(['install', '--frozen-lockfile']);
   assertMigrationProgression(plan.installed, sourceMigrations(backupContext(ctx)));
   ctx.log('DO migration preflight passed against the active deployment and target checkout');
@@ -358,7 +358,6 @@ function stopCelldAfterFailure(ctx: BoxContext): void {
 async function rollbackFailedUpgrade(
   ctx: BoxContext,
   opts: UpgradeOptions,
-  git: Git,
   from: string,
   backupDir: string,
   progress: UpgradeProgress
@@ -368,7 +367,7 @@ async function rollbackFailedUpgrade(
     if (progress.deploymentStarted) {
       await recoverUpgrade(ctx, from, backupDir, progress.imagesRebuilt, opts);
     } else {
-      git(['checkout', '--detach', from]);
+      check(checkoutWithTrackedModes(ctx.run, from, ctx.log), 'restore previous checkout');
       check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
       clearUpgradeJournal(ctx.stateDir);
     }
@@ -478,12 +477,11 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     composeRestarted = await applyUpgrade(
       ctx,
       opts,
-      git,
       { to, composeFilesChanged, rebuilds, boxArgs, installed },
       progress
     );
   } catch (error) {
-    await rollbackFailedUpgrade(ctx, opts, git, from, backupDir, progress);
+    await rollbackFailedUpgrade(ctx, opts, from, backupDir, progress);
     throw error;
   }
 

@@ -1,1 +1,11 @@
 @import '../../../../packages/ui/src/brand/brand.css';
+
+/* Text-safe warning ink. --color-warning is for icons, borders and bars; on an amber-tinted
+   light surface it reads at ~3.5:1, so amber text uses this (≥5:1 on every tint we use). */
+:root {
+  --color-warning-ink: var(--color-warning);
+}
+
+:root[data-theme='light'] {
+  --color-warning-ink: #92400e;
+}

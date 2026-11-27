@@ -20,12 +20,12 @@ import { generateDeploySigningKeyPair } from './deploy-signing-keys';
 import { isEntrypoint } from './entrypoint';
 import { deriveVapidKeyPairFromPem } from './vapid-keys';
 
-/** 32 random bytes, base64. Same shape as the Pulumi-managed `encryption-key`. */
+/** 32 random bytes, base64: the shape of the installation key `ENCRYPTION_KEY`. */
 export function generateEncryptionKey(): string {
   return crypto.randomBytes(32).toString('base64');
 }
 
-/** RSA-2048 PEM pair for JWT signing. Same shape as the Pulumi-managed `jwt-signing-key`. */
+/** RSA-2048 PEM pair for JWT signing: the shape of `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`. */
 export function generateKeyPair(): { publicKey: string; privateKey: string } {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
@@ -43,8 +43,16 @@ export function generateVapidKeyPair(): { publicKey: string; privateKey: string 
 }
 
 async function main(): Promise<void> {
+  // This prints key material, which is only acceptable on a developer's own machine.
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI) {
+    console.error('generate-keys prints keys and never runs in CI (policy 795e72a6).');
+    process.exitCode = 1;
+    return;
+  }
   console.log('🔑 Generating security keys for local development\n');
-  console.log('NOTE: For production, keys are managed by Pulumi and persist automatically.\n');
+  console.log(
+    'NOTE: local development only. A deployed installation creates its keys once, straight into its API Worker.\n'
+  );
 
   const encryptionKey = generateEncryptionKey();
   const { publicKey, privateKey } = generateKeyPair();

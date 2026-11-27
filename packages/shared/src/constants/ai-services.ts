@@ -792,6 +792,15 @@ export const AI_BUDGET_SETTINGS_KV_PREFIX = 'ai-budget-settings';
 /** KV key prefix for cached monthly AI cost per user. Written by cron, read by proxy. */
 export const AI_MONTHLY_COST_CACHE_KV_PREFIX = 'ai-monthly-cost';
 
+/**
+ * Default for admin setting `aiProxy.costEstimateGatewayLagSeconds` (AI Gateway installs): how far
+ * before the gateway month total's read time SAM's catalog estimate keeps counting calls.
+ */
+export const DEFAULT_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS = 600;
+
+/** Largest accepted `aiProxy.costEstimateGatewayLagSeconds` (one hourly cron interval). */
+export const MAX_AI_COST_ESTIMATE_GATEWAY_LAG_SECONDS = 3_600;
+
 /** KV key prefix for admin-managed per-user AI allowance ceilings. */
 export const AI_ADMIN_ALLOWANCE_KV_PREFIX = 'ai-admin-allowance';
 

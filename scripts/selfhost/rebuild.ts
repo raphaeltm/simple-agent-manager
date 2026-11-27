@@ -13,6 +13,7 @@ import { parseArgs } from 'node:util';
 import { log, SELFHOST_DIR } from './backup-cli';
 import { loadBoxEnv } from './box-settings';
 import { detectKeyCandidates } from './key-platforms';
+import { useOperatorUmask } from './operator-files';
 import { assertOperatorExecution } from './operator-only';
 import { fleetBucket } from './replaceable-box';
 import { runRebuild } from './replaceable-rebuild';
@@ -28,6 +29,8 @@ const { values } = parseArgs({
   },
 });
 assertOperatorExecution();
+// Operator commands never inherit a restrictive umask (operator-files.ts).
+useOperatorUmask();
 const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
 // It holds the bucket credential (or names the box's identity's bucket): it must stay private.
 assertPrivateFile(envFile);

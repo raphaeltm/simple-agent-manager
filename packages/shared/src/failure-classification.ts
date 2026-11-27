@@ -21,6 +21,7 @@ export type FailureCode =
   | 'mcp-auth-required'
   | 'unsupported-loopback-auth'
   | 'model-unavailable'
+  | 'sam-ai-usage-limit'
   | 'provider-overload'
   | 'agent-prompt-failed'
   | 'prompt-timeout'
@@ -163,6 +164,21 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [/^model_provider_credential_rejected$/],
+  },
+  {
+    // Emitted by the VM agent when the 429 came from SAM's own AI proxy limit (monthly spending
+    // limit or daily token budget), not from the provider (vm-agent internal/acp/sam_usage_limit.go).
+    code: 'sam-ai-usage-limit',
+    label: 'AI usage limit reached',
+    explanation:
+      'SAM refused the model call because your AI usage limit was reached (a monthly spending limit or the daily token budget).',
+    guidance:
+      'Retrying will not help until the limit resets. Check Settings > Usage, or ask an administrator to raise the limit.',
+    retryable: false,
+    // A task that stops on its usage limit has failed: the inbox system-error item and the
+    // failed-session grouping both read `diagnosable` (inbox/system-errors.ts, chat-session-utils.ts).
+    diagnosable: true,
+    patterns: [/^sam_ai_usage_limit_reached$/],
   },
   {
     code: 'provider-overload',
@@ -322,6 +338,7 @@ const STRUCTURAL_FAILURE_CODES = new Set<FailureCode>([
   'model-credential-missing',
   'model-credential-rejected',
   'agent-prompt-failed',
+  'sam-ai-usage-limit',
 ]);
 
 /**
