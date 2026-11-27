@@ -15,7 +15,10 @@ export const sourcePolicyFactory = String.raw`(()=>{
   while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>limit){await reader.cancel();throw new Error('Invalid source metadata');}text+=decoder.decode(part.value,{stream:true});}
   text+=decoder.decode();return JSON.parse(text);
  }
- async function verify(sourceCommit,previousSourceCommit){
+ // required: capabilities this job needs beyond the base set ('adoption' for a takeover and every
+ // update of an adopted installation: an older engine would ignore adoption settings and install a
+ // second SAM over the existing one).
+ async function verify(sourceCommit,previousSourceCommit,required=[]){
   if(!/^[a-f0-9]{40}$/.test(sourceCommit)||previousSourceCommit!==undefined&&!/^[a-f0-9]{40}$/.test(previousSourceCommit))return {ok:false,reason:'unsupported-source'};
   try{
    if(previousSourceCommit!==undefined){
@@ -23,7 +26,7 @@ export const sourcePolicyFactory = String.raw`(()=>{
     if(compared.status!=='ahead'||!Number.isSafeInteger(compared.ahead_by)||compared.ahead_by<1||compared.behind_by!==0)return {ok:false,reason:'not-forward'};
    }
    const protocol=await json(raw+sourceCommit+'/scripts/deploy/installer-protocol.json');
-   if(protocol.schemaVersion!==1||protocol.protocolVersion!==1||!Array.isArray(protocol.capabilities)||capabilities.some(value=>!protocol.capabilities.includes(value))||!protocol.entrypoints||Object.entries(paths).some(([key,value])=>protocol.entrypoints[key]!==value))return {ok:false,reason:'unsupported-source'};
+   if(protocol.schemaVersion!==1||protocol.protocolVersion!==1||!Array.isArray(protocol.capabilities)||[...capabilities,...required].some(value=>!protocol.capabilities.includes(value))||!protocol.entrypoints||Object.entries(paths).some(([key,value])=>protocol.entrypoints[key]!==value))return {ok:false,reason:'unsupported-source'};
    for(const path of Object.values(paths)){
     const response=await fetch(raw+sourceCommit+'/'+path,{method:'HEAD',headers,signal:AbortSignal.timeout(10000)});
     if(!response.ok)return {ok:false,reason:'unsupported-source'};

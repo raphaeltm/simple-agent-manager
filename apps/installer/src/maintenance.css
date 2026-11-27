@@ -29,6 +29,11 @@
   border-top: 1px solid var(--color-border);
   margin: 24px 0;
 }
+/* Domains, owner emails and account IDs can be longer than a phone is wide. */
+.deployment h1,
+.deployment details p {
+  overflow-wrap: anywhere;
+}
 .deployment-status {
   padding: 20px;
   margin-top: 20px;
