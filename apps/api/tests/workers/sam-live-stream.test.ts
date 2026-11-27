@@ -14,7 +14,11 @@ let env: Awaited<ReturnType<typeof startSamRuntime>>;
 
 beforeAll(async () => {
   env = await startSamRuntime(async (request) => {
-    if (!request.url.startsWith('https://gateway.ai.cloudflare.com/'))
+    // The gateway, or Workers AI's own endpoint when a test runs without a gateway.
+    if (
+      !request.url.startsWith('https://gateway.ai.cloudflare.com/') &&
+      !request.url.startsWith('https://api.cloudflare.com/client/v4/accounts/sam-test-account/ai/')
+    )
       throw new Error(`Unexpected external HTTP boundary: ${request.url}`);
     const body = (await request.json()) as Body;
     modelRequests.push({ body, headers: request.headers });
@@ -101,7 +105,12 @@ async function setup() {
     .bind(userId, `${userId}@example.test`, 'SAM Live Test')
     .run();
   const stub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId)) as SamRuntimeStub;
-  await stub.testEnvironment({ SAM_RATE_LIMIT_RPM: '30', SAM_MODEL: MODEL });
+  // The isolate's env is shared, so restore anything a test may have overridden.
+  await stub.testEnvironment({
+    SAM_RATE_LIMIT_RPM: '30',
+    SAM_MODEL: MODEL,
+    AI_GATEWAY_ID: 'sam-test-gateway',
+  });
   const request = (path: string, method = 'GET', body?: unknown, asUser = userId) =>
     stub.fetch(`https://sam-session${path}`, {
       method,
@@ -286,7 +295,10 @@ describe('SAM live answer stream in workerd', () => {
   it('runs the DeepSeek default at low reasoning effort, previews its reasoning, and bills cached input at the cached price', async () => {
     const model = '@cf/deepseek-ai/deepseek-v4.1-flash-1017';
     const { userId, stub, request, start } = await setup();
-    await stub.testEnvironment({ SAM_MODEL: '' });
+    // No AI Gateway: SAM's own price is the spend record and lands in the provider usage rows.
+    // With a gateway the price only backstops the gateway's total and the rows stay at $0
+    // (ai-gateway-cost-backstop.test.ts covers that path).
+    await stub.testEnvironment({ SAM_MODEL: '', AI_GATEWAY_ID: '' });
     const thought = deferred();
     const reasoning = (text: string) => ({
       ...base,

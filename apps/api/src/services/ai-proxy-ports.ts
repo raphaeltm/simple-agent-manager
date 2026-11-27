@@ -5,7 +5,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { resolveAdminSetting, resolveAdminSettingDetails } from './admin-settings-resolution';
-import { AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING } from './ai-proxy-settings';
+import {
+  AI_PROXY_COST_ESTIMATE_GATEWAY_LAG_SETTING,
+  AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING,
+} from './ai-proxy-settings';
 import { getPlatformAgentCredential } from './platform-credentials';
 
 /**
@@ -25,6 +28,9 @@ export function aiProxyPorts(env: Env, db?: ReturnType<typeof drizzle>): AiProxy
     externalReadTimeoutMs: async () =>
       Number(await resolveAdminSetting(env, 'performance.externalReadTimeoutMs')),
     monthlyCostCeilingUsd: () => readMonthlyCostCeilingUsd(env),
+    // Same cached settings snapshot as the ceiling; the package falls back to the default on error.
+    costEstimateGatewayLagSeconds: async () =>
+      Number(await resolveAdminSetting(env, AI_PROXY_COST_ESTIMATE_GATEWAY_LAG_SETTING)),
   };
 }
 

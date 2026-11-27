@@ -195,30 +195,86 @@ describe('installation ceiling on the direct-upstream (local metering) path', ()
   });
 });
 
-describe('AI Gateway path is unchanged', () => {
-  it('never reads the ceiling, and makes the same KV reads as before (rule 60)', async () => {
+describe('AI Gateway path applies the ceiling (hosted)', () => {
+  it('refuses at the ceiling when it is below the user cap, with the administrator message', async () => {
     const { rows, kv, env } = fixture(GATEWAY);
     rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ monthlyCostCapUsd: 10 }));
-    rows.set(buildMonthlyCostCacheKey('user'), '11');
+    rows.set(buildMonthlyCostCacheKey('user'), '2');
     const ports = ceiling(1);
     const gate = await checkAiUsageGate(kv, 'user', env, ports);
-    expect(gate).toMatchObject({ allowed: false, reason: 'monthly-cost-cap' });
-    expect(ports.monthlyCostCeilingUsd).not.toHaveBeenCalled();
-    // checkTokenBudget: settings + daily usage; checkMonthlyCostCap: settings + cached cost.
-    expect(kv.get.mock.calls.map(([key]) => String(key).split(':')[0])).toEqual([
-      'ai-budget-settings',
-      'ai-budget',
-      'ai-budget-settings',
-      'ai-monthly-cost',
-    ]);
+    expect(gate).toMatchObject({
+      allowed: false,
+      reason: 'monthly-cost-cap',
+      monthlyCap: { capUsd: 1, costUsd: 2, limitSource: 'administrator' },
+    });
+    expect(ports.monthlyCostCeilingUsd).toHaveBeenCalledTimes(1);
   });
 
-  it('a ceiling far below gateway spend does not block a gateway user without a cap', async () => {
+  it('refuses a gateway user with no cap of their own once gateway spend reaches the ceiling', async () => {
     const { rows, kv, env } = fixture(GATEWAY);
     rows.set(buildMonthlyCostCacheKey('user'), '500');
+    await expect(checkAiUsageGate(kv, 'user', env, ceiling(1))).resolves.toMatchObject({
+      allowed: false,
+      monthlyCap: { capUsd: 1, limitSource: 'administrator' },
+    });
+  });
+
+  it('admits below the ceiling (control)', async () => {
+    const { rows, kv, env } = fixture(GATEWAY);
+    rows.set(buildMonthlyCostCacheKey('user'), '0.5');
     await expect(checkAiUsageGate(kv, 'user', env, ceiling(1))).resolves.toEqual({
       allowed: true,
     });
+  });
+
+  it("does not hold a user-funded passthrough call to the ceiling; the user's own cap still applies", async () => {
+    const { rows, kv, env } = fixture(GATEWAY);
+    rows.set(buildMonthlyCostCacheKey('user'), '5');
+    const ports = ceiling(1);
+    await expect(
+      checkAiUsageGate(kv, 'user', env, ports, { platformBilled: false })
+    ).resolves.toEqual({ allowed: true });
+    expect(ports.monthlyCostCeilingUsd).not.toHaveBeenCalled();
+    rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ monthlyCostCapUsd: 4 }));
+    await expect(
+      checkAiUsageGate(kv, 'user', env, ports, { platformBilled: false })
+    ).resolves.toMatchObject({ allowed: false, monthlyCap: { capUsd: 4 } });
+  });
+
+  it('refuses with a 503 when the ceiling cannot be read', async () => {
+    const { kv, env } = fixture(GATEWAY);
+    const ports = { monthlyCostCeilingUsd: vi.fn(async () => Promise.reject(new Error('d1'))) };
+    await expect(checkAiUsageGate(kv, 'user', env, ports)).rejects.toMatchObject({
+      statusCode: 503,
+    });
+  });
+});
+
+describe('resolveMonthlyCostCeilingUsd where no monthly cap can apply', () => {
+  it('returns null without reading settings on a gateway install with no account API', async () => {
+    const { env } = fixture({ AI_GATEWAY_ID: 'gw', CF_ACCOUNT_ID: 'acct' });
+    const ports = { monthlyCostCeilingUsd: vi.fn(async () => Promise.reject(new Error('d1'))) };
+    await expect(resolveMonthlyCostCeilingUsd(env, ports)).resolves.toBeNull();
+    expect(ports.monthlyCostCeilingUsd).not.toHaveBeenCalled();
+  });
+
+  it('still refuses with a 503 where the cap applies (control)', async () => {
+    const { env } = fixture(GATEWAY);
+    const ports = { monthlyCostCeilingUsd: vi.fn(async () => Promise.reject(new Error('d1'))) };
+    await expect(resolveMonthlyCostCeilingUsd(env, ports)).rejects.toMatchObject({
+      statusCode: 503,
+    });
+  });
+});
+
+describe('a priced response that reports no usage', () => {
+  it('is still charged, from the response size', async () => {
+    const { env } = fixture();
+    await accountTokenUsageFromJson(
+      { choices: [{ message: { content: 'x'.repeat(30_000) } }] },
+      { env, userId: 'user', format: 'openai', costModelId: PRICED.id }
+    );
+    expect(await getLocalMonthlyAiCostUsd(env.KV, 'user', env)).toBeGreaterThan(0);
   });
 });
 
