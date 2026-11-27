@@ -111,7 +111,13 @@ function providerStore(initial: CustomProvider[]) {
   let providers = [...initial];
   let next = 1;
   const request: CloudflareRequest = async (method, path, body) => {
-    if (method === 'GET') return { status: 200, body: { success: true, result: providers } };
+    if (method === 'GET') {
+      const query = new URL(`https://x${path}`).searchParams;
+      const perPage = Number(query.get('per_page'));
+      const page = Number(query.get('page'));
+      const result = providers.slice((page - 1) * perPage, page * perPage);
+      return { status: 200, body: { success: true, result } };
+    }
     if (method === 'DELETE') {
       const id = decodeURIComponent(path.split('/').pop() ?? '');
       providers = providers.filter((provider) => provider.id !== id);
@@ -158,6 +164,22 @@ describe('ensureCustomProvider', () => {
     const writes = store.api.writes;
     expect(await ensureCustomProvider(store.api, 'acct', PLAN, URL_)).toBe('unchanged');
     expect(store.api.writes).toBe(writes);
+  });
+
+  it('finds its provider on a later page instead of creating a duplicate', async () => {
+    const others = Array.from({ length: 60 }, (_, index) => ({
+      id: `o${index}`,
+      slug: `other-${index}`,
+      base_url: 'https://example.com',
+      enable: true,
+    }));
+    const store = providerStore([
+      ...others,
+      { id: 'spike', slug: 'sam-test-upstream', enable: false },
+    ]);
+    expect(await ensureCustomProvider(store.api, 'acct', PLAN, URL_)).toBe('replaced');
+    expect(store.providers().filter((p) => p.slug === 'sam-test-upstream')).toHaveLength(1);
+    expect(store.providers()).toHaveLength(61);
   });
 
   it('creates the provider when none exists', async () => {

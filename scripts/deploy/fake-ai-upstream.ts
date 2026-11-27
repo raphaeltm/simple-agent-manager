@@ -87,8 +87,32 @@ function sameHeaders(actual: string | null | undefined, wanted: string): boolean
   }
 }
 
+/** Page size for the custom-providers list, and the page cap (5,000 providers) per run. */
+const PROVIDER_PAGE_SIZE = 50;
+const PROVIDER_MAX_PAGES = 100;
+
+/** Every custom provider in the account: a slug on page 2 must not read as absent. */
+async function listCustomProviders(api: Api, path: string): Promise<CustomProvider[]> {
+  const all: CustomProvider[] = [];
+  for (let page = 1; page <= PROVIDER_MAX_PAGES; page += 1) {
+    const batch =
+      (await api.call<CustomProvider[]>(
+        'GET',
+        `${path}?per_page=${PROVIDER_PAGE_SIZE}&page=${page}`
+      )) ?? [];
+    all.push(...batch);
+    if (batch.length < PROVIDER_PAGE_SIZE) return all;
+  }
+  throw new Error(
+    `More than ${PROVIDER_PAGE_SIZE * PROVIDER_MAX_PAGES} custom providers; refusing to guess`
+  );
+}
+
 /**
  * Make the custom provider match. Returns what it did. Never touches a provider with another slug.
+ * Cloudflare documents no update call, so a differing provider is deleted, then recreated: a
+ * failure between the two leaves no provider, and faked calls fail at the gateway (no real key
+ * is ever sent) until the next staging deploy recreates it.
  */
 export async function ensureCustomProvider(
   api: Api,
@@ -98,8 +122,9 @@ export async function ensureCustomProvider(
 ): Promise<'unchanged' | 'created' | 'replaced'> {
   const path = `/accounts/${accountId}/ai-gateway/custom-providers`;
   const wanted = desiredCustomProvider(plan, baseUrl);
-  const existing = (await api.call<CustomProvider[]>('GET', `${path}?per_page=100`)) ?? [];
-  const matches = existing.filter((provider) => provider.slug === plan.providerSlug);
+  const matches = (await listCustomProviders(api, path)).filter(
+    (provider) => provider.slug === plan.providerSlug
+  );
   const current = matches[0];
   if (
     matches.length === 1 &&
@@ -177,8 +202,8 @@ async function main(): Promise<void> {
     `/accounts/${accountId}/workers/subdomain`
   );
   if (!subdomain?.subdomain) throw new Error('The account has no workers.dev subdomain');
+  // Not printed: the address is not secret, but there is no reason to advertise it in logs.
   const baseUrl = `https://${plan.workerName}.${subdomain.subdomain}.workers.dev`;
-  console.log(`Fake AI upstream URL: ${baseUrl}`);
 
   await smokeWithRetry(baseUrl);
   const outcome = await ensureCustomProvider(api, accountId, plan, baseUrl);
