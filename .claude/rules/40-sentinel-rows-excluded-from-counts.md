@@ -1,6 +1,7 @@
 ---
 paths:
   - 'apps/api/**'
+  - 'scripts/deploy/installation-keys.ts'
 ---
 
 # Internal/Sentinel Rows Must Be Excluded From Business-Logic Counts

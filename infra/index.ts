@@ -65,16 +65,9 @@ export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
 
-// Export persisted keys plus the non-secret installation identity.
-export {
-  deploySigningPrivateKey,
-  encryptionKey,
-  installationId,
-  jwtPrivateKey,
-  jwtPublicKey,
-  previewSigningKey,
-  vapidPrivateKeyPem,
-} from './resources/secrets';
+// The non-secret installation identity. Installation keys are not Pulumi outputs: they live only
+// in the API Worker's secrets (scripts/deploy/installation-keys.ts).
+export { installationId } from './resources/secrets';
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
 export { originCaCertPem, originCaKeyPem };

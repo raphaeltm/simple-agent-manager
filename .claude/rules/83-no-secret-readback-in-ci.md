@@ -69,10 +69,9 @@ masked, and one stray `echo`, `set -x` or error message prints it.
   tracing and environment dumps in `.github/`, `scripts/` and `infra/`. It accepts a marked line
   only when the file and task are pinned in its `ALLOWED_LEGACY_READS` and the task is still
   open. Coverage and noise measurements are in `scripts/quality/README.md`.
-- **Known remaining exception:** `scripts/deploy/configure-secrets.sh` still reads the generated
-  keys back from Pulumi on every deploy (masked, marked, tracked by
-  `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md`). Until that task lands, keys do
-  reach runner memory on deploys.
+- **No legacy reads remain** (2026-11-26): installation keys live only in the API Worker and
+  deploys check their names (`scripts/deploy/installation-keys.ts`). `ALLOWED_LEGACY_READS` is
+  empty; a new entry needs an open task that removes it.
 - **The check catches ordinary shapes, not deliberate evasion.** It is a tripwire for the
   forms people write by habit; an obfuscated read (indirection, `eval`, encoded commands) is
   a review finding, not a gap to chase with more patterns.
