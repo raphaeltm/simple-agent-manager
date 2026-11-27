@@ -43,6 +43,20 @@ shared certificate should be unused.
   idempotently. Keep `CF_ORIGIN_CA_KEY` for the revoke for now, and remove it in a later cleanup.
   Tests cover the ID path and the fallback path with 0, 1 and 2+ matches.
 
+### Review notes for PR-B (from #3022's reviews)
+
+- Before revoking, call `GET /client/v4/certificates/<id>` once to confirm the recorded ID names a
+  live shared certificate. Treat "already revoked" or "not found" from DELETE as done, so a rerun
+  reaches the state delete.
+- `pulumi stack output originCaCertificateId` exits non-zero when the output is absent. Tell
+  "absent" (take the fallback) from a backend or login failure (abort). Never run a bare
+  `pulumi stack output`, and never use `--show-secrets`.
+- Fallback: check pagination, whether revoked certificates are listed, and that per-node CSRs
+  really have another subject (they are `CN=<nodeId>` with no O). The security reviewer would
+  rather skip when the ID is absent; the coordinator chose the strict exactly-one fallback.
+- Say which credential the revoke uses (`CF_ORIGIN_CA_KEY` via `X-Auth-User-Service-Key`, or a
+  token with SSL and Certificates write).
+
 ## Checklist
 
 - [x] PR-A: plain output `originCaCertificateId`
