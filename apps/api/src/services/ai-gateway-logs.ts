@@ -19,13 +19,13 @@ export {
   type UsageByProvider,
 } from '@simple-agent-manager/ai-proxy';
 
-/** Visit every AI Gateway log entry since `startDate`, paging automatically. */
+/** Visit every AI Gateway log entry since `startDate`, paging automatically; reports truncation. */
 export function iterateGatewayLogs(
   env: Env,
   gatewayId: string,
   startDate: string,
   visitor: (entry: pkg.AIGatewayLogEntry) => void,
   options: pkg.GatewayPaginationOptions = {}
-): Promise<void> {
+): Promise<{ truncated: boolean }> {
   return pkg.iterateGatewayLogs(env, aiProxyPorts(env), gatewayId, startDate, visitor, options);
 }

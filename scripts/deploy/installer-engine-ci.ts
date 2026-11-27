@@ -22,7 +22,6 @@ export const LEGACY_CI_DIRECT_SECRETS = [
   'R2_ACCESS_KEY_ID',
   'R2_SECRET_ACCESS_KEY',
   'PULUMI_CONFIG_PASSPHRASE',
-  'ENCRYPTION_KEY',
 ] as const;
 
 interface WorkflowStep {

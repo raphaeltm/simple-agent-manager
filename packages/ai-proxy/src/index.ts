@@ -10,6 +10,11 @@ export {
   resolveUpstreamAuth,
   type UpstreamAuth,
 } from './ai-billing';
+export {
+  buildCostEstimateWrite,
+  type CostEstimateWrite,
+  parseGatewayMonthlyCost,
+} from './ai-cost-estimate';
 export { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 export {
   aiGatewayOnlyHeaders,
@@ -36,6 +41,7 @@ export {
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
 export { getLocalUsageBreakdown } from './ai-model-usage';
 export {
+  getGatewayDirectMonthlySpendUsd,
   getLocalMonthlyAiCostUsd,
   type MonthlyCostCapCheck,
   monthlyCostCapMessage,

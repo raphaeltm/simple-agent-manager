@@ -1,5 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
 
+import {
+  COST_ESTIMATE_BUCKET_MS,
+  type CostEstimateWrite,
+  type GatewayAdmissionSnapshot,
+} from './ai-cost-estimate';
 import { type AiModelUsageRow, parseModelUsageRow } from './ai-model-usage';
 import type {
   AiProviderUsageAttribution,
@@ -52,6 +57,30 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
           PRIMARY KEY (budget_date, model_id)
         )`
       );
+      // Catalog-priced estimate that backstops the AI Gateway total (./ai-cost-estimate.ts).
+      // Gateway installs only; never shown as spend. Buckets are pruned past their retention.
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS ai_cost_estimate_bucket (
+          bucket_start       INTEGER PRIMARY KEY NOT NULL,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0,
+          updated_at         INTEGER NOT NULL
+        )`
+      );
+      // Gateway installs: priced spend on calls that bypassed the gateway (ai-cost-estimate.ts).
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS ai_direct_spend_month (
+          budget_month       TEXT PRIMARY KEY NOT NULL,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0,
+          updated_at         INTEGER NOT NULL
+        )`
+      );
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS ai_cost_estimate_month (
+          budget_month       TEXT PRIMARY KEY NOT NULL,
+          estimated_cost_usd REAL NOT NULL DEFAULT 0,
+          updated_at         INTEGER NOT NULL
+        )`
+      );
     });
   }
 
@@ -102,9 +131,12 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
   async increment(
     dateKey: string,
     inputTokens: number,
-    outputTokens: number
+    outputTokens: number,
+    costEstimate?: CostEstimateWrite
   ): Promise<TokenBudget> {
+    // One synchronous transaction: the day's tokens and the cost estimate move together (rule 45).
     return this.ctx.storage.transactionSync(() => {
+      if (costEstimate) this.recordCostEstimate(costEstimate);
       const current = this.readBudget(dateKey);
       const updated = {
         inputTokens: current.inputTokens + inputTokens,
@@ -236,6 +268,94 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
       }));
   }
 
+  /**
+   * Everything the gateway-path gate needs in one read: the day's tokens, the month's estimate and
+   * the estimate since `estimateSinceMs` (bucket containing it included, so the overlap errs
+   * toward counting). Reads at most one month row and the retained buckets in the window.
+   */
+  async getGatewayAdmissionSnapshot(
+    dateKey: string,
+    monthKey: string,
+    estimateSinceMs: number | null
+  ): Promise<GatewayAdmissionSnapshot> {
+    const budget = this.readBudget(dateKey);
+    const month = this.sql
+      .exec<{ estimated_cost_usd: number }>(
+        `SELECT estimated_cost_usd FROM ai_cost_estimate_month WHERE budget_month = ?`,
+        monthKey
+      )
+      .toArray()[0];
+    let estimateSinceUsd = 0;
+    if (estimateSinceMs !== null) {
+      const since = this.sql
+        .exec<{ total: number | null }>(
+          `SELECT SUM(estimated_cost_usd) AS total FROM ai_cost_estimate_bucket
+           WHERE bucket_start >= ?`,
+          Math.floor(estimateSinceMs / COST_ESTIMATE_BUCKET_MS) * COST_ESTIMATE_BUCKET_MS
+        )
+        .toArray()[0];
+      estimateSinceUsd = finiteNonNegative(since?.total);
+    }
+    const direct = this.sql
+      .exec<{ estimated_cost_usd: number }>(
+        `SELECT estimated_cost_usd FROM ai_direct_spend_month WHERE budget_month = ?`,
+        monthKey
+      )
+      .toArray()[0];
+    return {
+      budget,
+      estimateMonthUsd: finiteNonNegative(month?.estimated_cost_usd),
+      estimateSinceUsd,
+      directMonthUsd: finiteNonNegative(direct?.estimated_cost_usd),
+    };
+  }
+
+  private recordCostEstimate(estimate: CostEstimateWrite): void {
+    if (!(estimate.costUsd > 0) || !Number.isFinite(estimate.costUsd)) return;
+    const now = Date.now();
+    if (estimate.kind === 'direct') {
+      this.sql.exec(
+        `INSERT INTO ai_direct_spend_month (budget_month, estimated_cost_usd, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(budget_month) DO UPDATE SET
+           estimated_cost_usd = ai_direct_spend_month.estimated_cost_usd + excluded.estimated_cost_usd,
+           updated_at = excluded.updated_at`,
+        estimate.monthKey,
+        estimate.costUsd,
+        now
+      );
+      this.sql.exec(`DELETE FROM ai_direct_spend_month WHERE budget_month < ?`, estimate.monthKey);
+      return;
+    }
+    this.sql.exec(
+      `INSERT INTO ai_cost_estimate_bucket (bucket_start, estimated_cost_usd, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(bucket_start) DO UPDATE SET
+         estimated_cost_usd = ai_cost_estimate_bucket.estimated_cost_usd + excluded.estimated_cost_usd,
+         updated_at = excluded.updated_at`,
+      estimate.bucketStartMs,
+      estimate.costUsd,
+      now
+    );
+    this.sql.exec(
+      `INSERT INTO ai_cost_estimate_month (budget_month, estimated_cost_usd, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(budget_month) DO UPDATE SET
+         estimated_cost_usd = ai_cost_estimate_month.estimated_cost_usd + excluded.estimated_cost_usd,
+         updated_at = excluded.updated_at`,
+      estimate.monthKey,
+      estimate.costUsd,
+      now
+    );
+    // Bounded retention: buckets past the window any gateway total can still need, and months
+    // before the current one (both a WHERE-scoped DELETE).
+    this.sql.exec(
+      `DELETE FROM ai_cost_estimate_bucket WHERE bucket_start < ?`,
+      estimate.pruneBeforeMs
+    );
+    this.sql.exec(`DELETE FROM ai_cost_estimate_month WHERE budget_month < ?`, estimate.monthKey);
+  }
+
   private readBudget(dateKey: string): TokenBudget {
     const row = this.sql
       .exec<{ input_tokens: number; output_tokens: number }>(
@@ -251,4 +371,8 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
       outputTokens: row?.output_tokens ?? 0,
     };
   }
+}
+
+function finiteNonNegative(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
