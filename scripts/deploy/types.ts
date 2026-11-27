@@ -296,9 +296,8 @@ export interface CloudflareWorker {
 // Do NOT add resource naming constants here - use DEPLOYMENT_CONFIG instead.
 //
 // These are required Cloudflare Worker secrets after deployment configuration
-// runs. Do not treat this list as the manual GitHub Environment prerequisite
-// list: several platform-owned secrets are generated and persisted in Pulumi
-// state, then copied to Worker secrets by scripts/deploy/configure-secrets.sh.
+// runs, not the manual GitHub Environment prerequisites: the installation keys are
+// created once in the API Worker (installation-keys.ts) and deploys only check them.
 // GitHub App/OAuth values are optional compatibility fallbacks because runtime
 // platform config can now provide them after first-run setup.
 
@@ -311,14 +310,15 @@ export const REQUIRED_SECRETS = [
   'JWT_PUBLIC_KEY',
   'DEPLOY_SIGNING_PRIVATE_KEY',
   'DEPLOY_SIGNING_PUBLIC_KEY',
+  'PREVIEW_SIGNING_KEY',
+  'VAPID_PRIVATE_KEY',
+  'VAPID_PUBLIC_KEY',
 ] as const;
 
 // Note: HETZNER_TOKEN is NOT a platform secret.
 // Users provide their own tokens via Settings UI, stored encrypted per-user.
 // See docs/architecture/credential-security.md
 export const OPTIONAL_SECRETS = [
-  'VAPID_PRIVATE_KEY',
-  'VAPID_PUBLIC_KEY',
   'VAPID_SUBJECT',
   'GITHUB_CLIENT_ID',
   'GITHUB_CLIENT_SECRET',

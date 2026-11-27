@@ -18,7 +18,7 @@ function writeDeploymentSummary(input: LegacyCiInput, domain: string, success: b
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `## Deployment ${input.dryRun ? 'preview' : input.environment}: ${success ? 'complete' : 'failed'}\n\nCommit: ${input.sourceCommit}\n\n${input.dryRun ? 'Pulumi preview only.' : `API: https://api.${domain}\n\nApp: https://app.${domain}`}\n\n${success && !input.dryRun ? `Deployed infrastructure, D1 migration checks, API/Tail Workers, Pages UI, Codex runtime and CLI artifacts${input.skipAgent ? '' : ', and VM-agent binaries'}.` : ''}\n\nSecurity keys: ${input.secrets.ENCRYPTION_KEY ? 'explicit legacy override' : 'persisted Pulumi state'}.\n`
+      `## Deployment ${input.dryRun ? 'preview' : input.environment}: ${success ? 'complete' : 'failed'}\n\nCommit: ${input.sourceCommit}\n\n${input.dryRun ? 'Pulumi preview only.' : `API: https://api.${domain}\n\nApp: https://app.${domain}`}\n\n${success && !input.dryRun ? `Deployed infrastructure, D1 migration checks, API/Tail Workers, Pages UI, Codex runtime and CLI artifacts${input.skipAgent ? '' : ', and VM-agent binaries'}.` : ''}\n\nInstallation keys: kept in the API Worker; this deploy only checked their names.\n`
     );
 }
 

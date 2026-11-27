@@ -397,3 +397,14 @@ Fix: for an adoption plan the row reads "Stays as it is. If your SAM sends sign-
 Finding: the consent line and the service's takeover panel said the takeover checks that nothing else changes, while the deploy applies the assets bucket's upload CORS rule and creates the AI Gateway when the account has none, outside the Pulumi gates. Valid: the guide already listed them, the approval text did not.
 
 Fix (wording only; behaviour unchanged, both are configuration the approved source needs and a fork deploy applies the same): the consent line says the takeover is approved "after it checks that deploying SAM creates, replaces or deletes none of its resources"; the panel says what is checked and names the two settings the deploy also applies; the guide's lead sentence matches. Browser audit: clean run 156 screenshots, no overflow; panel sentence removed, `auditTakeoverPanel` red; consent line reverted, `full-adopt` red.
+
+## Merge of main with the installation-keys change (#3019), 2026-11-27
+
+#3019 landed on main first, so this branch took the conflicts (`installer-engine.ts`, `installer-engine.test.ts`). Resolution, using the keys owner's own reconciliation from the stacked draft #3018 for the overlapping files:
+
+- `applyInfrastructure` (`installer-engine-keys.ts`) runs the two takeover gates around the refresh, both with `previewExcludeArgs`: key resources an older release left in the state, and the retirement marker this release adds, exist only in the state and are left out of the check. Key retirement runs after the second gate, last before `pulumi up`.
+- An adopted installation is never treated as new: `freshInstallation: !c.adoption`, so `ensureInstallationKeys` fails on a missing key instead of generating one. The inherited test for this failed at `state-backend` and never reached the key step; it is replaced by `never creates installation keys for an adopted installation, even with none and an empty database`, which goes red when the flag is forced to `true` and has a new-installation control.
+- `PRESERVED_KEY_SECRETS` shrinks to `VAPID_SUBJECT`: no deploy writes installation keys any more, so the key-pair logic is gone.
+- Mutations on the merged code: gates without excludes (red: `migrates a stack that still has the key resources…`), takeover gates skipped (11 tests red).
+
+Staging: the ordinary deploy of this branch was tried on staging2 at 11:28Z before this merge and failed at `Pulumi Up` on the protected `installation-keys-retired` marker, as any branch without the keys change now does. It re-created six key resources in the staging2 state and deployed nothing; the keys owner's retire step removes them.

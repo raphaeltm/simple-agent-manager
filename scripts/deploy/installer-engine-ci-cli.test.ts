@@ -39,7 +39,10 @@ describe('actual CI CLI startup', () => {
       (_match, name: string) => JSON.stringify(supplied[name] || '')
     );
     const privateInput = JSON.parse(serialized);
-    expect(privateInput.CREDENTIAL_ENCRYPTION_KEY).toBe('');
+    // Installation keys never enter CI: the workflow passes none.
+    expect(privateInput).not.toHaveProperty('CREDENTIAL_ENCRYPTION_KEY');
+    expect(privateInput).not.toHaveProperty('ENCRYPTION_KEY');
+    expect(privateInput.CF_AIG_TOKEN).toBe('');
     expect(privateInput.GH_APP_PRIVATE_KEY).toBe(supplied.GH_APP_PRIVATE_KEY);
     vi.stubEnv('SAM_CI_SECRETS_JSON', serialized);
     vi.stubEnv('GITHUB_STEP_SUMMARY', '');
