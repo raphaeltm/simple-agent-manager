@@ -100,14 +100,6 @@
       ]
     },
     {
-      "classification": "synthetic-test-fixture",
-      "reason": "Reviewed deterministic unit-test encryption key literal introduced in an intermediate compute-pool reconciliation commit and removed from the current tree; exact PR-range finding only, not live credential material.",
-      "owner": "security",
-      "reviewedAt": "2026-08-29T00:00:00.000Z",
-      "expiresAt": "2026-11-27T00:00:00.000Z",
-      "digests": ["1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"]
-    },
-    {
       "classification": "documented-example",
       "reason": "Fresh pinned current-tree review: archived node-pool completion checklist prose describes administrator credential visibility, queue, fallback, empty-pool and migration states. The detector spans ordinary prose, with no credential assignment. Exact current finding only.",
       "owner": "security",
