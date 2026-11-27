@@ -17,13 +17,18 @@
  * 3. Superadmin setting `aiProxy.testUpstreamUserIds`: only the listed users' calls are faked.
  *    Empty (the default) means off; every other user on the installation keeps the real model.
  *
- * 4. Only where SAM meters spend itself (no AI Gateway, `hasLocalAiCostMetering`).
- *
- * The fake is answered in-process (`fakeUpstreamFetch`): nothing leaves the Worker, no platform key
- * or Cloudflare token is sent, and no provider is billed. Passthrough routes
+ * Where it answers:
+ * - No AI Gateway (`hasLocalAiCostMetering`): in-process (`fakeUpstreamFetch`). Nothing leaves the
+ *   Worker, no platform key or Cloudflare token is sent, and no provider is billed.
+ * - With an AI Gateway, spend is priced from the gateway's logs, so the call must go through it:
+ *   the gateway URL's provider segment is swapped for the staging-only fake's custom provider
+ *   (`AI_TEST_UPSTREAM_GATEWAY_PROVIDER`, `ai-test-upstream-gateway.ts`), which the deploy pipeline
+ *   creates and names on staging stacks only. No provider key is sent. Without that var the real
+ *   upstream is used. Passthrough routes
  * (`/ai/proxy/:wstoken/*`) and Workers AI models are not faked.
  */
 import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
+import { buildFakeUpstreamResponse } from '@simple-agent-manager/ai-proxy';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -34,7 +39,10 @@ import {
   AI_TEST_UPSTREAM_USER_IDS_SETTING,
   DEFAULT_AI_TEST_UPSTREAM_COST_PER_CALL_CENTS,
 } from './ai-proxy-settings';
-import { buildFakeUpstreamResponse } from './ai-test-upstream-responses';
+import {
+  gatewayTestUpstreamFetch,
+  resolveTestUpstreamGatewayProvider,
+} from './ai-test-upstream-gateway';
 
 /** The only value of `AI_TEST_UPSTREAM_ENABLED` that opens the deploy-time lock. */
 const AI_TEST_UPSTREAM_ENABLED_VALUE = 'true';
@@ -111,8 +119,11 @@ export async function resolveAiTestUpstream(
 ): Promise<AiTestUpstream | null> {
   if (!isAiTestUpstreamDeployable(env)) return null;
   // Where an AI Gateway exists, spend is read from the gateway's logs, so an in-process answer
-  // would be metered nowhere and prove nothing. The fake only answers where SAM meters itself.
-  if (!hasLocalAiCostMetering(env)) return null;
+  // would be metered nowhere and prove nothing: route through the gateway to the staging fake, or
+  // use the real upstream when this installation has no fake provider.
+  const localMetering = hasLocalAiCostMetering(env);
+  const gatewayProvider = localMetering ? null : resolveTestUpstreamGatewayProvider(env);
+  if (!localMetering && !gatewayProvider) return null;
   const userIds = await resolveAdminSetting(env, AI_TEST_UPSTREAM_USER_IDS_SETTING);
   if (!Array.isArray(userIds) || !userIds.some((id) => id.trim() === userId)) {
     // Only reachable on a test installation: says why a tester's call took the real upstream.
@@ -126,10 +137,13 @@ export async function resolveAiTestUpstream(
     userId,
     environment: env.ENVIRONMENT,
     costPerCallUsd: cost,
+    via: gatewayProvider ? 'gateway' : 'in-process',
   });
   return {
     costPerCallUsd: cost,
-    fetch: (url, init) => fakeUpstreamFetch(url, init, cost),
+    fetch: gatewayProvider
+      ? gatewayTestUpstreamFetch(env, gatewayProvider, cost, globalUpstreamFetch)
+      : (url, init) => fakeUpstreamFetch(url, init, cost),
   };
 }
 

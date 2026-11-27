@@ -1,14 +1,16 @@
 /**
- * Canned provider responses for the test-only fake AI upstream (`ai-test-upstream.ts`).
+ * Canned provider responses for the test-only fake AI upstream: answered in-process by the API
+ * Worker on installations without an AI Gateway (`apps/api/src/services/ai-test-upstream.ts`), and
+ * by the staging-only fake Worker behind the gateway (`ai-test-upstream-worker.ts`).
  *
  * Each response has the shape the real provider returns on that path (Anthropic Messages,
  * OpenAI Chat Completions, OpenAI Responses; JSON and SSE), with fixed text and a `usage` block
  * sized so the requested model's catalog price (`PLATFORM_AI_MODELS`) comes to the configured
  * cost. Nothing here makes a network call.
  */
-import { findPricedModel } from '@simple-agent-manager/ai-proxy';
+import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
-import { maybeJsonRecord } from '../lib/runtime-validation';
+import { findPricedModel } from './ai-cost-pricing';
 
 /** The text every fake completion returns. */
 export const FAKE_UPSTREAM_TEXT = 'SAM test upstream: canned reply (no real model was called).';

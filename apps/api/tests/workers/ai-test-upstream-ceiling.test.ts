@@ -13,6 +13,7 @@
  * upstream path, which needs a platform key this installation does not have (503), where the
  * fake would have answered 200.
  */
+import { FAKE_UPSTREAM_TEXT } from '@simple-agent-manager/ai-proxy';
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,7 +22,6 @@ import type { Env } from '../../src/env';
 import worker from '../../src/index';
 import { updateAdminSettings } from '../../src/services/admin-settings-mutations';
 import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
-import { FAKE_UPSTREAM_TEXT } from '../../src/services/ai-test-upstream-responses';
 import { signCallbackToken } from '../../src/services/jwt';
 import { seedNode, seedSignedInUser, seedUser, seedWorkspace } from './helpers/seed-d1';
 

@@ -2354,22 +2354,35 @@ An administrator ceiling denial directs the user to their administrator or the n
 
 A test installation can prove platform-funded metering and spending limits with no AI key. For
 allowlisted users, SAM-managed (`sam` mode) calls to `/ai/v1/chat/completions`, `/ai/v1/responses`
-and `/ai/anthropic/v1/messages` (and `count_tokens`) are answered in-process by a fake model instead
-of Anthropic or OpenAI (`services/ai-test-upstream.ts`). Every gate still runs: auth, model
+and `/ai/anthropic/v1/messages` (and `count_tokens`) are answered by a fake model instead of
+Anthropic or OpenAI (`services/ai-test-upstream.ts`). Every gate still runs: auth, model
 allowlist, tier, daily token budget and the monthly cap. The fake's response goes through the
 normal accounting path: it is priced from the catalog, recorded in the per-user counter and counted
-against the cap. Nothing leaves the Worker, and no platform key or Cloudflare token is sent.
+against the cap. Where the fake answers depends on the installation:
+
+- **Self-hosted VM (no AI Gateway):** in-process. Nothing leaves the Worker, and no platform key or
+  Cloudflare token is sent.
+- **Self-hosted Cloudflare (AI Gateway):** spend is priced from the gateway's logs, so the call must
+  go through the gateway. The proxy keeps the gateway URL and swaps the provider segment for the
+  fake's custom provider (`AI_TEST_UPSTREAM_GATEWAY_PROVIDER`, `services/ai-test-upstream-gateway.ts`).
+  It sends the gateway's own token (`cf-aig-authorization`), the usage metadata, the requested cost
+  and a per-token `cf-aig-custom-cost` at catalog price, and no provider key. The fake itself is a
+  separate Worker on workers.dev (`packages/ai-proxy/src/ai-test-upstream-worker.ts`): no bindings,
+  no secrets, canned replies only, and a 404 for any request without the fixed, non-secret
+  `x-sam-test-upstream` header that the custom provider config adds. Without the provider var the
+  real upstream is used.
+
 Passthrough routes (`/ai/proxy/:wstoken/*`) and Workers AI (`@cf/*`) models are not faked: an
 allowlisted user's passthrough calls still spend the real key.
 
 It is off unless all of these hold:
 
-| Lock                            | Where         | Meaning                                                                                                                                                     |
-| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AI_TEST_UPSTREAM_ENABLED=true` | Worker var    | Deploy-time lock, absent by default. Only the exact value `true` counts.                                                                                    |
-| `ENVIRONMENT`                   | Worker var    | Must be `staging`, `staging2`, `selfhost`, `development` or `test`. Production, unset and anything else are refused.                                        |
-| No AI Gateway                   | Worker vars   | Only where SAM meters spend itself (no addressable gateway). With a gateway, spend comes from the gateway's logs, which an in-process answer never reaches. |
-| `aiProxy.testUpstreamUserIds`   | Admin setting | User ids whose calls are faked (at most 50; default empty = off). Every other user keeps the real model.                                                    |
+| Lock                                | Where         | Meaning                                                                                                                                  |
+| ----------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `AI_TEST_UPSTREAM_ENABLED=true`     | Worker var    | Deploy-time lock, absent by default. Only the exact value `true` counts.                                                                 |
+| `ENVIRONMENT`                       | Worker var    | Must be `staging`, `staging2`, `selfhost`, `development` or `test`. Production, unset and anything else are refused.                     |
+| `AI_TEST_UPSTREAM_GATEWAY_PROVIDER` | Worker var    | Gateway installs only: the fake's custom provider, `custom-<prefix>-test-upstream`. Without it a gateway install uses the real upstream. |
+| `aiProxy.testUpstreamUserIds`       | Admin setting | User ids whose calls are faked (at most 50; default empty = off). Every other user keeps the real model.                                 |
 
 `aiProxy.testUpstreamCostPerCallCents` (admin setting, default `40`) is the list-price cost each fake
 call reports. The fake sizes its reported output tokens so the requested model's catalog price comes
@@ -2380,5 +2393,12 @@ listed users' real counters for the month.
 In practice this means a self-host box. Put `AI_TEST_UPSTREAM_ENABLED=true` in
 `deploy/selfhost/.state/secrets.env` (mode 0600) and run `pnpm selfhost:deploy`. To turn it off,
 delete the line and run `pnpm selfhost:deploy --unset AI_TEST_UPSTREAM_ENABLED`: on a sealed box,
-deleting the line alone keeps the sealed value. The Cloudflare deploy pipeline does not forward this
-variable, and Cloudflare installations have an AI Gateway anyway.
+deleting the line alone keeps the sealed value.
+
+On Cloudflare installs only the staging deploy pipeline sets these vars
+(`scripts/deploy/fake-ai-upstream-plan.ts`, staging stacks only; production is refused). Its
+"Deploy staging fake AI upstream" step (`scripts/deploy/fake-ai-upstream.ts`) publishes
+`<prefix>-fake-ai-<stack>` on workers.dev with no route and points the custom provider
+`<prefix>-test-upstream` at it, idempotently, with the deploy token passed straight to wrangler and
+the Cloudflare API. To use it on staging, list the test user in `aiProxy.testUpstreamUserIds`; to
+switch it off, empty that list.
