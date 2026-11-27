@@ -385,7 +385,7 @@ describe('deploy-staging.yml smoke-token probe', () => {
   );
   const probe =
     workflow.match(
-      /      - name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n      - name:)/
+      / {6}- name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n {6}- name:)/
     )?.[0] ?? '';
 
   it('runs only for a secondary installation, never the primary', () => {
@@ -514,18 +514,21 @@ describe('deploy-reusable.yml secondary installation wiring', () => {
       'GH_APP_PRIVATE_KEY',
       'GH_WEBHOOK_SECRET',
       'GOOGLE_LOGIN_CLIENT_SECRET',
-      'BETTER_AUTH_SECRET',
-      'CREDENTIAL_ENCRYPTION_KEY',
-      'DEPLOY_SIGNING_PRIVATE_KEY',
-      'VAPID_PRIVATE_KEY',
     ]) {
       expect(configure).toContain(
         `${name}: \${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.${name} || '' }}`
       );
     }
-    expect(configure).toContain(
-      "SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}"
-    );
+    // Installation keys reach no installation through CI: each one's keys live only in its Worker.
+    for (const name of [
+      'ENCRYPTION_KEY',
+      'JWT_PRIVATE_KEY',
+      'BETTER_AUTH_SECRET',
+      'CREDENTIAL_ENCRYPTION_KEY',
+      'DEPLOY_SIGNING_PRIVATE_KEY',
+      'VAPID_PRIVATE_KEY',
+    ])
+      expect(configure).not.toContain(`secrets.${name} `);
     // The primary's trust never reaches a secondary, and an unset secondary trust leaves the
     // Worker secret alone instead of deleting it.
     expect(configure).toContain(

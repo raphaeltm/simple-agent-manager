@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { INSTALLATION_KEY_NAMES } from './installation-keys.js';
 import {
   type BuildCacheStore,
   commandLabel,
@@ -151,8 +152,12 @@ function simulateMake(root: string, args: string[]) {
 }
 const makeCalls = (commands: Array<{ executable: string }>) =>
   commands.filter((entry) => entry.executable === 'make').length;
-function fixture(failOn?: string) {
+function fixture(failOn?: string, world: { urns?: string[] } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'installer-engine-'));
+  // The API Worker's secrets as Cloudflare holds them: a fresh installation has none.
+  const workerSecrets = new Map<string, string>();
+  const keyWrites: string[] = [];
+  let urns = [...(world.urns ?? [])];
   directories.push(root);
   mkdirSync(join(root, 'apps/api/container-artifacts'), { recursive: true });
   mkdirSync(join(root, '.wrangler'), { recursive: true });
@@ -192,13 +197,42 @@ function fixture(failOn?: string) {
       if (command.executable === 'git' && command.args[0] === 'status') return dirty;
       if (command.executable === 'git')
         return command.args.includes('HEAD') ? `${config.sourceCommit}\n` : 'false\n';
+      if (command.args.some((arg) => arg.endsWith('scripts/deploy/pulumi-stack-urns.sh')))
+        return urns.join('\n');
+      // State as Pulumi changes it: a targeted update adds the marker, `state delete` removes.
+      if (
+        command.executable === 'pulumi' &&
+        command.args[0] === 'up' &&
+        command.args[1] === '--target'
+      )
+        urns.push(command.args[2]!);
+      if (
+        command.executable === 'pulumi' &&
+        command.args[0] === 'state' &&
+        command.args[1] === 'delete'
+      )
+        urns = urns.filter((urn) => urn !== command.args[2]);
       if (command.args.includes('scripts/deploy/resolve-vm-agent-release.sh'))
         return `release=${'d'.repeat(40)}\nbuild_date=2026-10-28T00:00:00Z\n`;
       if (command.args.includes('ls')) return '[]';
       if (command.args.includes('output')) return JSON.stringify(outputs);
       return '';
     },
-    async request(url) {
+    async request(url, init) {
+      if (/\/workers\/scripts\/[^/]+\/secrets$/.test(url))
+        return Response.json({
+          success: true,
+          result: [...workerSecrets.keys()].map((name) => ({ name, type: 'secret_text' })),
+        });
+      if (/\/workers\/scripts\/[^/]+\/secrets-bulk$/.test(url)) {
+        const body = String(init?.body);
+        keyWrites.push(body);
+        const secrets = (JSON.parse(body) as { secrets: Record<string, { text: string }> }).secrets;
+        for (const [name, secret] of Object.entries(secrets)) workerSecrets.set(name, secret.text);
+        return Response.json({ success: true, result: {} });
+      }
+      if (url.endsWith('/d1/database/primary-id/query'))
+        return Response.json({ success: true, result: [{ results: [] }] });
       if (url.endsWith('/workers/subdomain'))
         return Response.json({ result: { subdomain: config.prefix } });
       if (url.endsWith('/deployments'))
@@ -240,6 +274,8 @@ function fixture(failOn?: string) {
     root,
     commands,
     runner,
+    workerSecrets,
+    keyWrites,
     setDirty: (value: string) => {
       dirty = value;
     },
@@ -685,6 +721,8 @@ describe('installation engine', () => {
   });
   it('executes CI skip-agent with legacy credentials and explicit empty required agent version', async () => {
     const f = fixture();
+    // A CI deploy runs against an installation that already has its keys.
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
     const base = { ...config, ownerEmail: undefined };
     const ci = { ...base, profile: 'legacy-ci', skipAgent: true };
     await runInstallerEngine(ci, {
@@ -799,19 +837,22 @@ describe('installation engine', () => {
     expect(invocation.environment).toMatchObject({
       REQUIRE_APPROVAL: 'true',
       VITE_PROJECT_LIST_LIMIT: '71',
-      SECRET_ENCRYPTION_KEY: 'legacy-key',
       GH_CLIENT_SECRET: 'github-private',
       CLOUDFLARE_API_USER_SERVICE_KEY: 'origin-private',
       ARTIFACTS_BINDING_ENABLED: 'false',
       VITE_FEATURE_MULTI_TERMINAL: 'true',
       AGENT_EMAIL_ENABLED: 'true',
     });
+    // A key supplied as a GitHub secret never reaches the engine: deploys do not handle keys.
+    expect(JSON.stringify(invocation.environment)).not.toContain('legacy-key');
     expect(Object.keys(invocation.environment).length).toBeGreaterThan(550);
     expect(JSON.stringify(invocation.config)).not.toContain('private');
   });
 
   it('repairs a missing Tail Worker without extra API bootstrap revisions and preserves sync overrides', async () => {
     const f = fixture();
+    // A CI deploy runs against an installation that already has its keys.
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
     rmSync(join(f.root, '.wrangler/api-worker-first-deploy'));
     const ci = { ...config, ownerEmail: undefined, profile: 'legacy-ci' };
     await runInstallerEngine(ci, {
@@ -834,6 +875,8 @@ describe('installation engine', () => {
   });
   it('never writes the retired anonymous-trial KV switch, even for legacy staging', async () => {
     const f = fixture();
+    // A CI deploy runs against an installation that already has its keys.
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
     const original = f.runner.run;
     f.runner.run = async (command, opts) =>
       command.args.includes('output')
@@ -902,10 +945,10 @@ describe('installation engine', () => {
   it('never renames an existing account workers.dev subdomain', async () => {
     const f = fixture();
     const originalRequest = f.runner.request;
-    f.runner.request = async (url) =>
+    f.runner.request = async (url, init) =>
       url.endsWith('/workers/subdomain')
         ? Response.json({ result: { subdomain: 'existing-account' } })
-        : originalRequest(url);
+        : originalRequest(url, init);
     await runInstallerEngine(
       { ...config, workersDev: { action: 'preserve', subdomain: 'existing-account' } },
       { ...f, environment: privateEnv, emit() {}, save() {} }
@@ -1150,6 +1193,7 @@ describe('installation engine', () => {
     expect(existsSync(join(f.root, '.wrangler/installer-source-upstream.bundle'))).toBe(false);
     let opened = false;
     const legacy = fixture();
+    for (const name of INSTALLATION_KEY_NAMES) legacy.workerSecrets.set(name, 'existing');
     await runInstallerEngine(
       { ...config, ownerEmail: undefined, profile: 'legacy-ci' },
       {
@@ -1165,5 +1209,198 @@ describe('installation engine', () => {
     );
     expect(opened).toBe(false);
     expect(makeCalls(legacy.commands)).toBe(3);
+  });
+});
+describe('installation engine: retiring installation-key resources from Pulumi state', () => {
+  const stackUrn = 'urn:pulumi:prod::sam-infra::pulumi:pulumi:Stack::sam-infra-prod';
+  const keyUrns = [
+    'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::encryption-key',
+    'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::deploy-signing-private-key',
+    'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::preview-signing-key',
+    'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::trial-claim-token-secret',
+    'urn:pulumi:prod::sam-infra::tls:index/privateKey:PrivateKey::jwt-signing-key',
+    'urn:pulumi:prod::sam-infra::tls:index/privateKey:PrivateKey::vapid-key',
+  ];
+  const identityUrn = 'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::installation-id';
+  const markerUrn =
+    'urn:pulumi:prod::sam-infra::random:index/randomId:RandomId::installation-keys-retired';
+  // Same name as a key resource, another type: never on the allowlist.
+  const lookalike = 'urn:pulumi:prod::sam-infra::cloudflare:index/record:Record::encryption-key';
+  const lines = (f: ReturnType<typeof fixture>) =>
+    f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
+  const stateCommands = (calls: string[]) =>
+    calls.filter((line) => line.startsWith('pulumi state'));
+  const run = (f: ReturnType<typeof fixture>) =>
+    runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} }).then(
+      () => undefined,
+      (error: Error) => error
+    );
+
+  it('migrates a stack that still has the key resources: retirement runs after refresh, last before up', async () => {
+    const f = fixture(undefined, { urns: [stackUrn, ...keyUrns, identityUrn, lookalike] });
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
+    expect(await run(f)).toBeUndefined();
+    const calls = lines(f);
+    const refresh = calls.findIndex((line) => line.includes('pulumi-refresh-safe.sh'));
+    const firstState = calls.findIndex((line) => line.startsWith('pulumi state'));
+    const markerUp = calls.indexOf(`pulumi up --target ${markerUrn} --yes --skip-preview`);
+    const up = calls.indexOf('pulumi up --yes --skip-preview');
+    expect(refresh).toBeLessThan(markerUp);
+    // The marker is in state before the first key resource leaves it.
+    expect(markerUp).toBeLessThan(firstState);
+    expect(stateCommands(calls)).toHaveLength(keyUrns.length * 2);
+    const lastState =
+      calls.length - 1 - [...calls].reverse().findIndex((line) => line.startsWith('pulumi state'));
+    expect(lastState).toBe(up - 1);
+    for (const urn of keyUrns) {
+      expect(calls).toContain(`pulumi state unprotect ${urn} --yes`);
+      expect(calls).toContain(`pulumi state delete ${urn} --yes`);
+    }
+    expect(stateCommands(calls).some((line) => line.includes(identityUrn))).toBe(false);
+    expect(stateCommands(calls).some((line) => line.includes(lookalike))).toBe(false);
+    for (const entry of f.commands.filter(
+      (command) => command.executable === 'pulumi' && command.args[0] === 'state'
+    ))
+      expect(entry.discardOutput).toBe(true);
+    // Nothing was regenerated or written: the Worker keeps the values it runs with.
+    expect(f.keyWrites).toEqual([]);
+    expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
+  });
+
+  it('updates a stack that was already migrated without touching state', async () => {
+    const f = fixture(undefined, { urns: [stackUrn, identityUrn, markerUrn] });
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
+    expect(await run(f)).toBeUndefined();
+    expect(stateCommands(lines(f))).toEqual([]);
+    expect(f.keyWrites).toEqual([]);
+  });
+
+  it('never removes key resources from state while the Worker is missing a key', async () => {
+    const f = fixture(undefined, { urns: [stackUrn, ...keyUrns, identityUrn] });
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (name !== 'PREVIEW_SIGNING_KEY') f.workerSecrets.set(name, 'existing');
+    const error = await run(f);
+    expect(error?.message).toContain('infrastructure failed');
+    expect(stateCommands(lines(f))).toEqual([]);
+    expect(lines(f).some((line) => line.startsWith('pulumi up'))).toBe(false);
+    expect(f.keyWrites).toEqual([]);
+  });
+});
+
+describe('installation engine: installation keys', () => {
+  async function install(
+    f: ReturnType<typeof fixture>,
+    // The engine validates its input itself (validateEngineConfig), as other tests rely on.
+    input: unknown = config,
+    environment: NodeJS.ProcessEnv = privateEnv
+  ) {
+    const events: EngineEvent[] = [];
+    const saved: string[] = [];
+    const results: unknown[] = [];
+    const outcome = await runInstallerEngine(input, {
+      ...f,
+      environment,
+      emit: (event) => events.push(event),
+      save: (checkpoint) => {
+        saved.push(JSON.stringify(checkpoint));
+      },
+    }).then(
+      (state) => ({ state, error: undefined }),
+      (error: Error) => ({ state: undefined, error })
+    );
+    return { ...outcome, events, saved, results };
+  }
+
+  it('creates every key once, straight into the Worker, and no value appears anywhere else', async () => {
+    const f = fixture();
+    const { error, events, saved, results } = await install(f);
+    expect(error).toBeUndefined();
+    expect(f.keyWrites).toHaveLength(1);
+    expect([...f.workerSecrets.keys()].sort()).toEqual([...INSTALLATION_KEY_NAMES].sort());
+    const values = [...f.workerSecrets.values()];
+    expect(new Set(values).size).toBe(values.length);
+    // Canary: every generated value, and every line of a PEM, appears only in the one write.
+    const fragments = values.flatMap((value) =>
+      value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length >= 16 && !line.startsWith('-----'))
+    );
+    const elsewhere = JSON.stringify({ commands: f.commands, events, saved, results });
+    for (const fragment of fragments) expect(elsewhere).not.toContain(fragment);
+    // Created before the secrets step and the final API deploy.
+    const phases = events
+      .filter((event) => event.status === 'completed')
+      .map((event) => event.phase);
+    expect(phases.indexOf('installation-keys')).toBeLessThan(phases.indexOf('publish-application'));
+  });
+
+  it('an update of an installation that has its keys writes none', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES) f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error).toBeUndefined();
+    expect(f.keyWrites).toEqual([]);
+    expect(f.workerSecrets.get('ENCRYPTION_KEY')).toBe('existing');
+  });
+
+  it('never recreates a whole key group an installation lost, and names it', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (!name.startsWith('VAPID_')) f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    // No rotation: nothing was written, and the keys it has are untouched.
+    expect(f.keyWrites).toEqual([]);
+    expect(f.workerSecrets.has('VAPID_PRIVATE_KEY')).toBe(false);
+    expect(f.workerSecrets.get('JWT_PRIVATE_KEY')).toBe('existing');
+  });
+
+  it('refuses to complete a key pair the Worker holds only half of, and writes nothing', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (name !== 'JWT_PUBLIC_KEY') f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
+  });
+
+  it('never creates ENCRYPTION_KEY for an installation that has other keys', async () => {
+    const f = fixture();
+    for (const name of INSTALLATION_KEY_NAMES)
+      if (name !== 'ENCRYPTION_KEY') f.workerSecrets.set(name, 'existing');
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
+  });
+
+  it('refuses to create keys when the database already has users', async () => {
+    const f = fixture();
+    const original = f.runner.request;
+    f.runner.request = async (url, init) =>
+      url.endsWith('/d1/database/primary-id/query')
+        ? Response.json({ success: true, result: [{ results: [{ present: 1 }] }] })
+        : original(url, init);
+    const { error } = await install(f);
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
+  });
+
+  it('a CI deploy against a Worker missing its keys fails and never generates one', async () => {
+    const f = fixture();
+    const { error } = await install(
+      f,
+      { ...config, ownerEmail: undefined, profile: 'legacy-ci' },
+      {
+        ...privateEnv,
+        CF_RUNTIME_API_TOKEN: undefined,
+      }
+    );
+    expect(error?.message).toContain('failed');
+    expect(f.keyWrites).toEqual([]);
+    expect(f.workerSecrets.size).toBe(0);
+    expect(
+      f.commands.some((entry) => entry.args.includes('scripts/deploy/configure-secrets.sh'))
+    ).toBe(false);
   });
 });
