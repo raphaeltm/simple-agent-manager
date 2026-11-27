@@ -289,19 +289,46 @@ export function carryDeployedVars(
   return carried;
 }
 
-/** Names (never values) of the key secrets the deployed API Worker already holds. */
-export async function existingPreservedKeySecrets(
+/** Names (never values) of the secrets the deployed API Worker holds. */
+async function deployedSecretNames(
   access: CloudflareAccess & { worker: string }
-): Promise<string[]> {
+): Promise<Set<string>> {
   const secrets = await cloudflareResult(access, `workers/scripts/${access.worker}/secrets`);
   if (!secrets.found) throw new Error('Adopted API Worker not found');
   if (!Array.isArray(secrets.result)) throw new Error('Invalid Worker secrets listing');
-  const present = new Set(
+  return new Set(
     (secrets.result as Array<{ name?: unknown }>)
       .map((entry) => entry?.name)
       .filter((name): name is string => typeof name === 'string')
   );
+}
+
+/** Names (never values) of the key secrets the deployed API Worker already holds. */
+export async function existingPreservedKeySecrets(
+  access: CloudflareAccess & { worker: string }
+): Promise<string[]> {
+  const present = await deployedSecretNames(access);
   return PRESERVED_KEY_SECRETS.filter((name) => present.has(name));
+}
+
+/**
+ * Settings an older release kept as Worker secrets and later moved to plain vars. Every deploy
+ * deletes those secrets (STALE_SECRETS in configure-secrets.sh), because a secret shadows the
+ * var of the same name. A takeover cannot read a secret to carry its value, so the deletion
+ * would silently swap the owner's setting for the source's default.
+ */
+export const LEGACY_SETTING_SECRETS = ['AI_PROXY_DEFAULT_MODEL', 'AI_PROXY_ENABLED'] as const;
+
+/** Takeover step 1c, before anything changes: no setting may exist only as a legacy secret. */
+export async function refuseShadowedSettings(
+  access: CloudflareAccess & { worker: string }
+): Promise<void> {
+  const present = await deployedSecretNames(access);
+  const kept = LEGACY_SETTING_SECRETS.filter((name) => present.has(name));
+  if (kept.length)
+    throw new AdoptionRefused([
+      `This SAM keeps ${kept.join(' and ')} as Worker secrets from an older release. A takeover would delete them without being able to read them, so those AI proxy settings would fall back to SAM defaults. Update your SAM once the way it was deployed, which turns them into ordinary settings, then take over.`,
+    ]);
 }
 
 /**

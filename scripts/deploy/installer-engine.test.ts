@@ -18,6 +18,7 @@ import {
   runInstallerEngine,
   validateEngineConfig,
 } from './installer-engine.js';
+import { LEGACY_SETTING_SECRETS } from './installer-engine-adoption.js';
 import { VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   legacyCiEnvironmentManifest,
@@ -1269,6 +1270,8 @@ describe('installation engine: adopting an existing deployment', () => {
     owners?: number;
     /** The deployed API Worker has the agent email binding. */
     emailBinding?: boolean;
+    /** Settings the deployed Worker still keeps as secrets, from before they became vars. */
+    legacySecrets?: readonly string[];
     /** The deployed database has no user and no stored credential. */
     emptyDatabase?: boolean;
     /** `pulumi stack` cannot open the state's secrets: exit 1 with this failure tail. */
@@ -1389,6 +1392,7 @@ describe('installation engine: adopting an existing deployment', () => {
               ...new Set([
                 ...(world.workerKeys ?? INSTALLATION_KEY_NAMES),
                 ...f.workerSecrets.keys(),
+                ...(world.legacySecrets ?? []),
                 'VAPID_SUBJECT',
                 'GITHUB_CLIENT_SECRET',
               ]),
@@ -1763,6 +1767,27 @@ describe('installation engine: adopting an existing deployment', () => {
     // Liveness for the refusal test above: a takeover that opens its state does build and deploy.
     expect(calls.some((line) => line.includes('make -C'))).toBe(true);
     expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(true);
+  });
+
+  it('refuses a takeover of a deployment that keeps a setting only as a legacy secret', async () => {
+    // Every deploy deletes these secrets; a takeover cannot read one to carry its value.
+    const f = adoptionFixture({ legacySecrets: ['AI_PROXY_ENABLED'] });
+    const { error, events } = await run(adopted, f);
+    expect(error?.message).toContain('Installation phase adoption-preflight failed');
+    expect(events.find((event) => event.status === 'failed')?.tail).toEqual([
+      'This SAM keeps AI_PROXY_ENABLED as Worker secrets from an older release. A takeover would delete them without being able to read them, so those AI proxy settings would fall back to SAM defaults. Update your SAM once the way it was deployed, which turns them into ordinary settings, then take over.',
+    ]);
+    const calls = f.lines();
+    for (const step of ['pulumi-refresh-safe.sh', 'pulumi preview', 'pulumi up', 'wrangler'])
+      expect(calls.some((line) => line.includes(step))).toBe(false);
+    // The names refused are ones the secrets script deletes on every deploy, and a retired
+    // secret that shadows no setting does not stop a takeover.
+    const script = readFileSync(resolve(import.meta.dirname, 'configure-secrets.sh'), 'utf8');
+    const stale = /STALE_SECRETS=\(([\s\S]*?)\n\)/.exec(script)?.[1] ?? '';
+    for (const name of LEGACY_SETTING_SECRETS) expect(stale).toContain(`"${name}"`);
+    expect(stale).toContain('"ANTHROPIC_API_KEY_TRIAL"');
+    const retired = adoptionFixture({ legacySecrets: ['ANTHROPIC_API_KEY_TRIAL'] });
+    expect((await run(adopted, retired)).error).toBeUndefined();
   });
 
   it('refuses a takeover while forced setup is switched on, before reading or changing anything else', async () => {

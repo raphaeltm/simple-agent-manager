@@ -414,3 +414,9 @@ Staging: the ordinary deploy of this branch was tried on staging2 at 11:28Z befo
 Finding: with a long prefix and environment the installer-style candidate `<prefix>-pulumi-state-<environment>` can exceed R2's 63 characters; R2 answers such a lookup with an error, not a 404, so the preview failed instead of finding the fork-style bucket. Valid.
 
 Fix: `existingBuckets` (`apps/installer/src/adoption-plan.ts`) skips a name `BUCKET_NAME` rejects, since it cannot exist; this also covers the assets-bucket probes of `findDeployment`. The test fake now refuses impossible names with a 400 as R2 does, and the name-length test uses the longest names R2 actually allows (the old one modelled a 111-character assets bucket). Mutation: filter removed, `takes over a deployment with the longest names R2 allows, never probing a name it would refuse` red.
+
+## Codex round 16 (on 2db3531ca): legacy setting secrets deleted on a takeover
+
+Finding: every deploy deletes the `STALE_SECRETS` (`configure-secrets.sh`), among them `AI_PROXY_ENABLED` and `AI_PROXY_DEFAULT_MODEL`, which older releases kept as Worker secrets before they became vars. A deployment that still holds one runs on a value the takeover cannot read; deleting it would swap that value for the source's default, outside the gates. Valid.
+
+Fix: `refuseShadowedSettings` (`installer-engine-adoption.ts`) refuses the takeover in `adoption-preflight` while the Worker holds either name, and tells the owner to update once the old way first (a fork deploy sets the var from its own settings). The two retired trial secrets shadow nothing and do not stop a takeover. Test: `refuses a takeover of a deployment that keeps a setting only as a legacy secret` (refusal text, no later step, parity with the script's `STALE_SECRETS`, retired-secret control). Mutation: call removed, test red.

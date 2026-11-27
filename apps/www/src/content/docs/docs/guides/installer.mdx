@@ -186,6 +186,10 @@ that check are listed under "What the deploy itself applies" below:
   (`SETUP_FORCE=true`, `refuseForcedSetup`). That switch reopens the setup page for account
   recovery. A takeover would switch it off under you, and keeping it on would leave an emergency
   switch on for good. Finish the recovery and remove it first.
+- **It stops before changing your deployment** when your SAM still keeps `AI_PROXY_ENABLED` or
+  `AI_PROXY_DEFAULT_MODEL` as a Worker secret, as releases from before those became ordinary
+  settings did (`refuseShadowedSettings`). Every deploy deletes those secrets, and the service
+  cannot read one to keep its value. Update your SAM once the way it was deployed, then take over.
 - **It stops before changing your deployment** when your SAM has no active administrator, which
   means its first-run setup was never finished (`refuseWithoutOwner`). A takeover binds no owner
   and hands over no setup token. Finish setup on the existing deployment first, or install a new

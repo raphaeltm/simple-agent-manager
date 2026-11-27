@@ -9,6 +9,7 @@ import {
   keepAdoptedDeployment,
   refuseForcedSetup,
   refuseRollback,
+  refuseShadowedSettings,
   refuseUnopenableState,
 } from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
@@ -352,6 +353,7 @@ export async function runInstallerEngine(
         execute('pulumi', ['stack'], join(root, 'infra'), true, true)
       );
       await refuseForcedSetup({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
+      await refuseShadowedSettings({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
       await refuseRollback({
         ...cloudflareAccess,
         root,
