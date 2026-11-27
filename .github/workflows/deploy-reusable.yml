@@ -2081,6 +2081,7 @@ jobs:
           CREDENTIAL_ENVIRONMENT: ${{ inputs.environment }}
           DEPLOY_STACK: ${{ steps.deploy_resources.outputs.stack }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
+          AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}
 
       # Wrangler starts gradual rollouts before returning; both deployment paths
       # must wait for the exact targets to finish before reporting success.

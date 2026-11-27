@@ -13,7 +13,8 @@
  * 3. Ensure the custom provider `<prefix>-test-upstream`: base URL = the Worker's workers.dev URL,
  *    with the fixed gating header in the provider's `headers`, enabled. Cloudflare documents no
  *    update call, so a provider that differs is deleted and recreated under the same slug.
- * 4. Smoke: the Worker answers 404 without the gating header and 200 with it.
+ * 4. Smoke: the Worker answers 404 without the gating header and 200 with it, and one call
+ *    through the gateway reaches it (200).
  *
  * Secrets (rule 83): the deploy token comes from `secrets.CF_API_TOKEN` through env and goes
  * straight to wrangler (env) and to the Cloudflare API (an Authorization header). It is never
@@ -21,7 +22,7 @@
  *
  * Usage (from the deploy workflow): pnpm tsx scripts/deploy/fake-ai-upstream.ts
  * Env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CREDENTIAL_ENVIRONMENT, DEPLOY_STACK,
- *      RESOURCE_PREFIX.
+ *      RESOURCE_PREFIX, AI_GATEWAY_ID.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -61,7 +62,8 @@ export interface CustomProvider {
   id: string;
   slug: string;
   base_url?: string;
-  headers?: string | null;
+  /** Documented as a JSON string; an object form is accepted too. */
+  headers?: string | Record<string, unknown> | null;
   enable?: boolean;
 }
 
@@ -78,8 +80,9 @@ export function desiredCustomProvider(plan: FakeAiUpstreamPlan, baseUrl: string)
   };
 }
 
-function sameHeaders(actual: string | null | undefined, wanted: string): boolean {
+function sameHeaders(actual: CustomProvider['headers'], wanted: string): boolean {
   if (!actual) return false;
+  if (typeof actual === 'object') return JSON.stringify(actual) === wanted;
   try {
     return JSON.stringify(JSON.parse(actual)) === wanted;
   } catch {
@@ -167,6 +170,31 @@ async function smokeWithRetry(url: string): Promise<void> {
   throw new Error('The fake AI upstream did not answer 404 ungated and 200 gated');
 }
 
+/**
+ * One call through the real gateway to the custom provider: proves the gateway adds the gating
+ * header, joins base URL and path as assumed, and does not forward its own auth to the fake (the
+ * fake refuses credential headers with 400). Only the status is printed.
+ */
+async function gatewaySmoke(
+  accountId: string,
+  gatewayId: string,
+  plan: FakeAiUpstreamPlan,
+  token: string
+): Promise<number> {
+  const url = `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/${plan.gatewayProvider}/v1/messages`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'cf-aig-authorization': `Bearer ${token}`,
+      'cf-aig-metadata': JSON.stringify({ source: 'deploy-smoke' }),
+    },
+    body: JSON.stringify({ model: 'deploy-smoke', max_tokens: 1, messages: [] }),
+  });
+  await response.body?.cancel();
+  return response.status;
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
@@ -180,7 +208,8 @@ async function main(): Promise<void> {
     prefix: required('RESOURCE_PREFIX'),
   });
   const accountId = required('CLOUDFLARE_ACCOUNT_ID');
-  const api = new Api(fetchRequest(required('CLOUDFLARE_API_TOKEN')));
+  const token = required('CLOUDFLARE_API_TOKEN');
+  const api = new Api(fetchRequest(token));
   console.log(`Fake AI upstream: worker ${plan.workerName}, provider ${plan.gatewayProvider}`);
 
   const dir = mkdtempSync(join(tmpdir(), 'sam-fake-ai-'));
@@ -208,6 +237,15 @@ async function main(): Promise<void> {
   await smokeWithRetry(baseUrl);
   const outcome = await ensureCustomProvider(api, accountId, plan, baseUrl);
   console.log(`Custom provider ${plan.providerSlug}: ${outcome}`);
+
+  // The provider takes a moment to become routable after a recreate.
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const status = await gatewaySmoke(accountId, required('AI_GATEWAY_ID'), plan, token);
+    console.log(`gateway smoke ${attempt}/6: HTTP ${status}`);
+    if (status === 200) return;
+    await new Promise((done) => setTimeout(done, 5000));
+  }
+  throw new Error('The AI Gateway did not reach the fake AI upstream (see the statuses above)');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

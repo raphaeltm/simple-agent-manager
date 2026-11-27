@@ -182,6 +182,20 @@ describe('ensureCustomProvider', () => {
     expect(store.providers()).toHaveLength(61);
   });
 
+  it('treats an object-form headers field as equal (no needless delete and recreate)', async () => {
+    const store = providerStore([
+      {
+        id: 'current',
+        slug: 'sam-test-upstream',
+        base_url: URL_,
+        enable: true,
+        headers: { [AI_TEST_UPSTREAM_GATE_HEADER]: AI_TEST_UPSTREAM_GATE_VALUE },
+      },
+    ]);
+    expect(await ensureCustomProvider(store.api, 'acct', PLAN, URL_)).toBe('unchanged');
+    expect(store.api.writes).toBe(0);
+  });
+
   it('creates the provider when none exists', async () => {
     const store = providerStore([]);
     expect(await ensureCustomProvider(store.api, 'acct', PLAN, URL_)).toBe('created');
@@ -213,5 +227,6 @@ describe('deploy workflow step', () => {
     const env = step!.env as Record<string, string>;
     expect(env.CLOUDFLARE_API_TOKEN).toBe('${{ secrets.CF_API_TOKEN }}');
     expect(env.CREDENTIAL_ENVIRONMENT).toBe('${{ inputs.environment }}');
+    expect(env.AI_GATEWAY_ID).toBe('${{ steps.deploy_resources.outputs.ai_gateway }}');
   });
 });
