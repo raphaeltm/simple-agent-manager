@@ -28,6 +28,9 @@ function account(
   const buckets = new Set(options.buckets ?? ['sam-pulumi-state', 'sam-prod-assets']);
   const fetch = vi.fn(async (url: string, _init?: RequestInit) => {
     const bucket = /\/r2\/buckets\/([^/?]+)$/.exec(url)?.[1];
+    // R2 refuses a name it could never hold; only a possible name can be "not found".
+    if (bucket && !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket))
+      return Response.json({ success: false, errors: [{ code: 10005 }] }, { status: 400 });
     if (bucket)
       return buckets.has(bucket)
         ? Response.json({ success: true, result: { name: bucket } })
@@ -287,15 +290,23 @@ describe('taking over an existing SAM', () => {
   });
 });
 
-it('accepts every name length a fork deployment may have (prefix up to 40, environment up to 63)', async () => {
+it('takes over a deployment with the longest names R2 allows, never probing a name it would refuse', async () => {
   const prefix = `a${'b'.repeat(38)}c`; // 40, the fork workflow's maximum
-  const environment = `e${'n'.repeat(61)}v`; // 63
-  account({
+  // 15: with this prefix the assets bucket is exactly R2's 63 characters, the fork-style state
+  // bucket is 53, and the installer-style one would be 69, which R2 refuses to look up.
+  const environment = `e${'n'.repeat(13)}v`;
+  expect(`${prefix}-${environment}-assets`).toHaveLength(63);
+  expect(`${prefix}-pulumi-state-${environment}`.length).toBeGreaterThan(63);
+  const fetch = account({
     routes: [{ pattern: 'api.example.com/*', script: `${prefix}-api-${environment}` }],
     buckets: [`${prefix}-pulumi-state`, `${prefix}-${environment}-assets`],
   });
   const plan = await previewAdoption('private', config);
+  expect(plan.conflicts).toEqual([]);
   expect(plan.adoption).toEqual({ prefix, environment, stateBucket: `${prefix}-pulumi-state` });
+  expect(
+    fetch.mock.calls.some(([url]) => url.endsWith(`/${prefix}-pulumi-state-${environment}`))
+  ).toBe(false);
   expect(() =>
     validateInstallationConfig({
       ...config,

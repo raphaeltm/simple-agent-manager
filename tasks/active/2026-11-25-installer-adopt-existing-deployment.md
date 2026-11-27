@@ -408,3 +408,9 @@ Fix (wording only; behaviour unchanged, both are configuration the approved sour
 - Mutations on the merged code: gates without excludes (red: `migrates a stack that still has the key resources…`), takeover gates skipped (11 tests red).
 
 Staging: the ordinary deploy of this branch was tried on staging2 at 11:28Z before this merge and failed at `Pulumi Up` on the protected `installation-keys-retired` marker, as any branch without the keys change now does. It re-created six key resources in the staging2 state and deployed nothing; the keys owner's retire step removes them.
+
+## Codex round 15 (on 3dbc3f6da): derived state-bucket names R2 cannot hold
+
+Finding: with a long prefix and environment the installer-style candidate `<prefix>-pulumi-state-<environment>` can exceed R2's 63 characters; R2 answers such a lookup with an error, not a 404, so the preview failed instead of finding the fork-style bucket. Valid.
+
+Fix: `existingBuckets` (`apps/installer/src/adoption-plan.ts`) skips a name `BUCKET_NAME` rejects, since it cannot exist; this also covers the assets-bucket probes of `findDeployment`. The test fake now refuses impossible names with a 400 as R2 does, and the name-length test uses the longest names R2 actually allows (the old one modelled a 111-character assets bucket). Mutation: filter removed, `takes over a deployment with the longest names R2 allows, never probing a name it would refuse` red.

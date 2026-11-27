@@ -143,6 +143,9 @@ async function existingBuckets(
 ): Promise<string[]> {
   const existing: string[] = [];
   for (const name of names) {
+    // A derived name R2 could not hold (too long for a long prefix and environment) cannot
+    // exist, and R2 answers such a lookup with an error, not a 404.
+    if (!BUCKET_NAME.test(name)) continue;
     try {
       await cloudflare(token, `/accounts/${accountId}/r2/buckets/${name}`);
       existing.push(name);
