@@ -465,3 +465,12 @@ Ordinary deploy of this branch to staging2, run 46000930134, head cf293f953 (the
 Checked from the workspace at 12:57–12:59Z instead: `https://api.sammy2.party/health` healthy; workload-identity sign-in 200 as `staging2-test-user` (superadmin); `/dashboard`, `/projects`, `/settings`, `/nodes`, `/admin` load at 375 and 1280 wide with no page error, no error text and no horizontal overflow; `GET /api/projects` lists the existing projects. The only non-2xx was `403 GITHUB_NOT_CONNECTED` on `/api/github/installations`, the designed reply for a user with no GitHub connection on an installation with no GitHub App. Signed out (200, then 401) and released the lease.
 
 No takeover was run on staging: that part was waived (see "Raphaël's decisions").
+
+## Merged, 2026-11-27
+
+PR #3011 merged at 13:18Z as main commit 30db3e75a (squash of head 53f1554b2: CI green, every review thread resolved). No takeover has been run against a real deployment; Raphaël waived that before merge (see "Raphaël's decisions"), and the first real one is to be done with someone watching.
+
+Open after the merge, tracked as ideas, not in this task:
+
+- Settings handover for a deployment that kept settings in its fork's GitHub Environment: idea `01M8C88CXH9YTBZ4X3TDN1GP7J`.
+- MEDIUM and LOW hardening left from the attacker review: idea `01M8CDVGG5CT46TERWD3HJP9PP`.
