@@ -13,9 +13,53 @@ state, I want them out") rules out. `.claude/rules/07-env-and-urls.md` says new 
 their Origin CA keys locally and fetch certificates through the node-scoped callback, so the
 shared certificate should be unused.
 
+## Findings (2026-11-27)
+
+- No code reads the shared certificate or key. Since #1413 (2026-07-01) cloud-init generates a
+  node-local key and fetches a per-node certificate from `/api/nodes/:id/origin-ca-certificate`
+  (`packages/cloud-init/src/template-ingress.ts`), with no fallback: a node that cannot get one
+  refuses to start. Per-node issuance uses the Worker's own `CF_API_TOKEN`
+  (`apps/api/src/services/origin-ca-certificates.ts`). `env.ts` declares `ORIGIN_CA_CERT`/
+  `ORIGIN_CA_KEY`, but nothing reads them.
+- Live nodes: production's two running nodes were created 2026-08-26 and 2026-11-27, after #1413.
+  staging has none. staging2 has only Cloudflare containers, which use no origin certificate.
+- Extra copies: `sam-api-prod` and `sam-api-staging` still hold `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY`
+  Worker secrets. staging2's Worker has neither.
+- Per-node certificates use the same hostnames as the shared one (`buildOriginCaHostnames`), so a
+  hostname match cannot identify the shared certificate. `pulumi stack --show-ids` is banned by
+  the `state-export` guard (rule 83).
+
+## Plan (coordinator decision, 2026-11-27)
+
+- **PR-A:** add only the plain output `originCaCertificateId`. After it deploys, confirm the output
+  holds a value on production and staging.
+- **PR-B:** the retire step revokes exactly the recorded ID when `pulumi stack output
+  originCaCertificateId` returns one. When the output is absent (a fork that takes both releases
+  at once), it skips the revoke and prints one plain line naming the certificate's hostnames and the
+  Cloudflare dashboard page where an operator can revoke it by hand. There is no subject-match
+  fallback (coordinator, 2026-11-27, after the security review). A revoke cannot be undone, a
+  self-hoster could have made their own certificate with the same subject, and a leftover
+  certificate only helps someone who already controls the zone's DNS.
+- The revoke is skipped while the installation's D1 has a non-deleted node created before #1413;
+  the state delete and the secret delete still run. The stale Worker secrets are deleted by name,
+  idempotently. Keep `CF_ORIGIN_CA_KEY` for the revoke for now, and remove it in a later cleanup.
+  Tests cover the ID path, the absent-output skip, and a backend error (abort).
+
+### Review notes for PR-B (from #3022's reviews)
+
+- Before revoking, call `GET /client/v4/certificates/<id>` once to confirm the recorded ID names a
+  live shared certificate. Treat "already revoked" or "not found" from DELETE as done, so a rerun
+  reaches the state delete.
+- `pulumi stack output originCaCertificateId` exits non-zero when the output is absent. Tell
+  "absent" (take the fallback) from a backend or login failure (abort). Never run a bare
+  `pulumi stack output`, and never use `--show-secrets`.
+- Say which credential the revoke uses (`CF_ORIGIN_CA_KEY` via `X-Auth-User-Service-Key`, or a
+  token with SSL and Certificates write).
+
 ## Checklist
 
-- [ ] Prove nothing uses the shared certificate: no script reads `originCaKeyPem`/`originCaCertPem`,
+- [x] PR-A: plain output `originCaCertificateId`
+- [x] Prove nothing uses the shared certificate: no script reads `originCaKeyPem`/`originCaCertPem`,
       no cloud-init or VM agent path reads `ORIGIN_CA_CERT`/`ORIGIN_CA_KEY`, and no live node (staging,
       staging2, production) still serves it. Check nodes' cert serials against the Pulumi cert's serial
       by name, never by exporting state.
