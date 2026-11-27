@@ -362,9 +362,11 @@ export async function runInstallerEngine(
     });
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
+  // Not on a takeover: the cache lives in the state bucket, and a takeover that is refused must
+  // leave that bucket exactly as it found it. The first update after it fills the cache.
   const cached = await openEngineBuildCache({
     options,
-    enabled: c.profile !== 'legacy-ci',
+    enabled: c.profile !== 'legacy-ci' && !c.adoption?.takeover,
     accountId: c.accountId,
     bucket: stateBucket,
     root,

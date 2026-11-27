@@ -207,6 +207,9 @@ that check are listed under "What the deploy itself applies" below:
   change to anything else on it, such as its production branch, stops the takeover. The same
   check runs again immediately before the change is applied.
 - **It never creates** a deploy-state bucket or stack: a missing one stops the takeover.
+- **It writes nothing to your deploy-state bucket until its checks pass.** The takeover run keeps
+  no build cache there (`openEngineBuildCache` is off for it), so a takeover that stops leaves the
+  bucket as it found it. Later updates do keep their build cache in that bucket.
 - **Your keys stay**: the installation keys the API Worker holds (`ENCRYPTION_KEY`, the JWT, signing
   and VAPID keys) are never read, replaced or created by a takeover or by any later update; a
   deploy only checks, by name, that they are there (`scripts/deploy/installation-keys.ts`). If

@@ -1769,6 +1769,46 @@ describe('installation engine: adopting an existing deployment', () => {
     expect(calls.some((line) => line.startsWith('pulumi up'))).toBe(true);
   });
 
+  it('writes nothing to the deploy-state bucket on a takeover run, refused or not', async () => {
+    // The build cache lives in the state bucket, which a refused takeover must leave as it was.
+    const engine = (
+      input: InstallerEngineConfig,
+      f: ReturnType<typeof adoptionFixture>,
+      cache: ReturnType<typeof memoryStore>
+    ) =>
+      runInstallerEngine(input, {
+        ...f,
+        environment: privateEnv,
+        emit() {},
+        save() {},
+        buildCache: cache.buildCache,
+      }).then(
+        () => undefined,
+        (error: Error) => error
+      );
+    const refusedCache = memoryStore();
+    const refused = adoptionFixture({
+      preview: {
+        steps: [
+          sameStep,
+          {
+            op: 'create',
+            urn: 'urn:pulumi:prod::sam::cloudflare:index/r2Bucket:R2Bucket::new-bucket',
+          },
+        ],
+      },
+    });
+    expect(await engine(adopted, refused, refusedCache)).toBeDefined();
+    expect(refusedCache.objects.size).toBe(0);
+    const cache = memoryStore();
+    expect(await engine(adopted, adoptionFixture(), cache)).toBeUndefined();
+    expect(cache.objects.size).toBe(0);
+    // Control: the first update of that installation does use the cache.
+    const update = { ...adopted, adoption: { ...adoption, takeover: false } };
+    expect(await engine(update, adoptionFixture(), cache)).toBeUndefined();
+    expect(cache.objects.size).toBeGreaterThan(0);
+  });
+
   it('refuses a takeover of a deployment that keeps a setting only as a legacy secret', async () => {
     // Every deploy deletes these secrets; a takeover cannot read one to carry its value.
     const f = adoptionFixture({ legacySecrets: ['AI_PROXY_ENABLED'] });

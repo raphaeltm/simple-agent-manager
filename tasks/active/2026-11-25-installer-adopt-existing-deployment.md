@@ -451,3 +451,17 @@ task-completion-validator re-run: no CRITICAL or HIGH. Code and tests pass (engi
 ## File size limit, 2026-11-27
 
 `Validate Deploy Scripts` failed at "Enforce source file size limits" on cf293f953 and ba8608d0b: adding the completion-panel audit took `apps/installer/tests/browser-audit.ts` to 810 lines (limit 800). `auditTakeoverPanel` moved to `apps/installer/tests/browser-audit-takeover.ts` (the main file is 732 lines); it takes `captureState` as an argument. `pnpm quality:file-sizes` passes and the audit still captures 162 screenshots with no overflow.
+
+## Codex round 18 (on f81378bba): build cache written to the state bucket before the gates
+
+Finding: `openEngineBuildCache` pointed at the adopted deployment's state bucket and published a source bundle (and cached build outputs) before `applyInfrastructure`, so a refused takeover still wrote `installer-cache/*` objects into that bucket. Valid; the attacker review had noted the same as a side effect of a wrong passphrase.
+
+Fix: the build cache is off for a takeover run (`enabled: … && !c.adoption?.takeover` in `installer-engine.ts`); the first update after it fills the cache. Test: `writes nothing to the deploy-state bucket on a takeover run, refused or not` (refused run and successful run both leave the store empty; a later update fills it). Mutation: flag removed, test red. Engine suite 238.
+
+## Staging verification, 2026-11-27
+
+Ordinary deploy of this branch to staging2, run 46000930134, head cf293f953 (the later commits change a code comment, docs, the task file, installer page copy, an audit test file, and the takeover-only cache flag above; none is shipped or exercised by `deploy-staging.yml`, which does not use the installer engine). Every step from Pulumi Refresh through Upload CLI Binaries succeeded, including "Retire Installation-Key Resources From Pulumi State" (which removed the six key resources the 11:28Z attempt had re-created), Pulumi Up, Run Database Migrations, Configure Worker Secrets and Deploy API Worker. The run is marked failed at its last check, "Health Check", which polls from the GitHub runner and is blocked by Cloudflare on staging2 (inbox tasks 01M89VWDNC8PDBARHC8G3RRA13 and 01M86G5HPXQFHMAVENVXWPBACV).
+
+Checked from the workspace at 12:57–12:59Z instead: `https://api.sammy2.party/health` healthy; workload-identity sign-in 200 as `staging2-test-user` (superadmin); `/dashboard`, `/projects`, `/settings`, `/nodes`, `/admin` load at 375 and 1280 wide with no page error, no error text and no horizontal overflow; `GET /api/projects` lists the existing projects. The only non-2xx was `403 GITHUB_NOT_CONNECTED` on `/api/github/installations`, the designed reply for a user with no GitHub connection on an installation with no GitHub App. Signed out (200, then 401) and released the lease.
+
+No takeover was run on staging: that part was waived (see "Raphaël's decisions").
