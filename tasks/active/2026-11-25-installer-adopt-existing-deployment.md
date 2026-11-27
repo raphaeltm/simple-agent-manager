@@ -447,3 +447,7 @@ Fix (wording): the completion panel confirms data, keys and users, says settings
 ## Completion validation, 2026-11-27 (head cf293f953)
 
 task-completion-validator re-run: no CRITICAL or HIGH. Code and tests pass (engine 237, installer 177); every test named in the review-round sections exists; the preflight and infrastructure order matches the guide; the three takeover form fields reach `previewAdoption`. Its MEDIUM and LOW findings were stale wording, fixed in the next commit: the live-proof items above are marked waived, the pre-#3019 key statements are annotated, the `keepAdoptedDeployment` comment no longer speaks of key secrets, and the guide, the security note and the form say the passphrase opens the deploy state, which may still hold key copies, instead of saying it unlocks the keys. Research finding 12 (rebase after #2993): #2993 had not merged when this was written; nothing to rebase onto.
+
+## File size limit, 2026-11-27
+
+`Validate Deploy Scripts` failed at "Enforce source file size limits" on cf293f953 and ba8608d0b: adding the completion-panel audit took `apps/installer/tests/browser-audit.ts` to 810 lines (limit 800). `auditTakeoverPanel` moved to `apps/installer/tests/browser-audit-takeover.ts` (the main file is 732 lines); it takes `captureState` as an argument. `pnpm quality:file-sizes` passes and the audit still captures 162 screenshots with no overflow.
