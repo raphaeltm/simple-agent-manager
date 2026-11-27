@@ -34,14 +34,16 @@ shared certificate should be unused.
 - **PR-A:** add only the plain output `originCaCertificateId`. After it deploys, confirm the output
   holds a value on production and staging.
 - **PR-B:** the retire step revokes exactly the recorded ID when `pulumi stack output
-  originCaCertificateId` returns one. Without it (a fork that takes both releases at once), it falls
-  back to listing the zone's Origin CA certificates and revoking only when exactly one has the CSR
-  subject `CN=*.<BASE_DOMAIN>, O=Simple Agent Manager`; otherwise it logs the count and skips.
-  First check that Cloudflare's list response includes the CSR.
+  originCaCertificateId` returns one. When the output is absent (a fork that takes both releases
+  at once), it skips the revoke and prints one plain line naming the certificate's hostnames and the
+  Cloudflare dashboard page where an operator can revoke it by hand. There is no subject-match
+  fallback (coordinator, 2026-11-27, after the security review). A revoke cannot be undone, a
+  self-hoster could have made their own certificate with the same subject, and a leftover
+  certificate only helps someone who already controls the zone's DNS.
 - The revoke is skipped while the installation's D1 has a non-deleted node created before #1413;
   the state delete and the secret delete still run. The stale Worker secrets are deleted by name,
   idempotently. Keep `CF_ORIGIN_CA_KEY` for the revoke for now, and remove it in a later cleanup.
-  Tests cover the ID path and the fallback path with 0, 1 and 2+ matches.
+  Tests cover the ID path, the absent-output skip, and a backend error (abort).
 
 ### Review notes for PR-B (from #3022's reviews)
 
@@ -51,9 +53,6 @@ shared certificate should be unused.
 - `pulumi stack output originCaCertificateId` exits non-zero when the output is absent. Tell
   "absent" (take the fallback) from a backend or login failure (abort). Never run a bare
   `pulumi stack output`, and never use `--show-secrets`.
-- Fallback: check pagination, whether revoked certificates are listed, and that per-node CSRs
-  really have another subject (they are `CN=<nodeId>` with no O). The security reviewer would
-  rather skip when the ID is absent; the coordinator chose the strict exactly-one fallback.
 - Say which credential the revoke uses (`CF_ORIGIN_CA_KEY` via `X-Auth-User-Service-Key`, or a
   token with SSL and Certificates write).
 
