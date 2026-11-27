@@ -18,3 +18,9 @@ Reviewed upstream Gorilla14commits and compression1.20.5 changes against all cal
 
 ## Blocker and release conditions
 Existing setup ask:01M86G5HPXQFHMAVENVXWPBACV and task01M84XXMBA4P3C39RR9EDKG9NV/#3014 own runner Cloudflare challenge. No duplicate fix, ask, lease overwrite or unchanged redeploy. Runtime staging is mandatory; tooling exception does not apply. Release this prerequisite before SDK2997, then inherit through main normally. Preserve original PR branch/history.
+
+## 27 November integration checkpoint
+
+Normal main merge `52a10661633a02883c7c8e9f5b6878c71efa8be4` inherits merged installation-key work #3019 (`2ca8bf2c038081f7dcd889f83fb082dc71b3b4b9`). Entire VM-agent tree is identical to the prior reviewed candidate; diff against main remains go.mod/go.sum plus this task. Independent Go/completion integration review PASS, no findings. Fresh mod verify/build/vet PASS and repository-pinned govulncheck reports No vulnerabilities found. Focused race verification is in progress; prior full-race evidence remains applicable to the unchanged tree. New-head CI must pass after push. CodeRabbit's previous failed request/skip is final for this unchanged implementation.
+
+The key prerequisite is cleared, but #3014 runner-header proof and the canonical setup item's Rule2 VM ready/heartbeat proof remain outstanding. Do not deploy or allocate another VM into the unchanged challenge. Retain mandatory leased runtime staging, cleanup and sequential actual rollout gates. No task completion or merge readiness claimed.
