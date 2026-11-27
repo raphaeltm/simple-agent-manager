@@ -26,7 +26,7 @@ import {
   dnsRecordIds,
   dnsHostnames,
 } from './resources/dns';
-import { originCaCertPem, originCaKeyPem } from './resources/origin-ca';
+import { originCaCertificateId, originCaCertPem, originCaKeyPem } from './resources/origin-ca';
 import { pagesProject, pagesProjectName, pagesCustomDomain } from './resources/pages';
 import { accountId, baseDomain } from './resources/config';
 
@@ -70,7 +70,7 @@ export const hostnames = dnsHostnames;
 export { installationId } from './resources/secrets';
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)
-export { originCaCertPem, originCaKeyPem };
+export { originCaCertificateId, originCaCertPem, originCaKeyPem };
 
 // Stack summary output
 export const stackSummary = {

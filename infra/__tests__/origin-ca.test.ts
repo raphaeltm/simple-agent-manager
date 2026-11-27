@@ -49,6 +49,12 @@ describe("Origin CA Resources", () => {
     expect(cert.options.protect).toBeUndefined();
   });
 
+  it("exports the certificate's Cloudflare ID as a plain output from the stack", async () => {
+    const stack = await import("../index");
+    expect(stack.originCaCertificateId).toBe(originCaModule.originCaCertificateId);
+    await expect(getSecretStatus(originCaModule.originCaCertificateId)).resolves.toBe(false);
+  });
+
   it("exports Origin CA certificate and key as Pulumi secrets", async () => {
     await expect(getSecretStatus(originCaModule.originCaCertPem)).resolves.toBe(true);
     await expect(getSecretStatus(originCaModule.originCaKeyPem)).resolves.toBe(true);
