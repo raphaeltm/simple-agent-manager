@@ -39,6 +39,7 @@ import { type FakeAiUpstreamPlan, planFakeAiUpstream } from './fake-ai-upstream-
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const WORKER_ENTRY = join(REPO_ROOT, 'packages/ai-proxy/src/ai-test-upstream-worker.ts');
+const WRANGLER_BIN = join(REPO_ROOT, 'apps/api/node_modules/wrangler/bin/wrangler.js');
 /** Matches the API and tail Workers' compatibility date. */
 const COMPATIBILITY_DATE = '2026-01-01';
 
@@ -217,11 +218,11 @@ async function main(): Promise<void> {
     const config = join(dir, 'wrangler.toml');
     writeFileSync(config, fakeAiUpstreamWranglerConfig(plan));
     // The token reaches wrangler only through its inherited env (CLOUDFLARE_API_TOKEN).
-    execFileSync(
-      'pnpm',
-      ['--filter', '@simple-agent-manager/api', 'exec', 'wrangler', 'deploy', '--config', config],
-      { cwd: REPO_ROOT, stdio: 'inherit' }
-    );
+    // The API Worker's pinned wrangler, run by this Node binary: no PATH lookup.
+    execFileSync(process.execPath, [WRANGLER_BIN, 'deploy', '--config', config], {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -249,7 +250,9 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error: unknown) => {
+  try {
+    await main();
+  } catch (error: unknown) {
     // Messages can carry text from remote responses; never let it form a workflow command.
     const message = (error instanceof Error ? error.message : String(error)).replaceAll(
       '::',
@@ -257,5 +260,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     );
     console.error(`::error::${message}`);
     process.exit(1);
-  });
+  }
 }

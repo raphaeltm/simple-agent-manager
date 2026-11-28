@@ -39,37 +39,19 @@ describe('planFakeAiUpstream', () => {
     ).toMatchObject({ workerName: 'sam2-fake-ai-staging2', providerSlug: 'sam2-test-upstream' });
   });
 
+  // [label, credential environment, stack, prefix]
   it.each([
-    [
-      'the production environment',
-      { credentialEnvironment: 'production', stack: 'prod', prefix: 'sam' },
-    ],
-    [
-      'a production stack under staging credentials',
-      { credentialEnvironment: 'staging', stack: 'prod', prefix: 'sam' },
-    ],
-    [
-      'a production-looking prefix',
-      { credentialEnvironment: 'staging', stack: 'staging', prefix: 'sam-prod' },
-    ],
-    [
-      'a fork production stack with an unmapped name',
-      { credentialEnvironment: 'main', stack: 'main', prefix: 'fork' },
-    ],
-    [
-      'an unknown stack under staging credentials',
-      { credentialEnvironment: 'staging', stack: 'staging3', prefix: 'sam3' },
-    ],
-    [
-      'a staging stack under other credentials',
-      { credentialEnvironment: 'development', stack: 'staging', prefix: 'sam' },
-    ],
-    [
-      'a prefix that is not a plain name',
-      { credentialEnvironment: 'staging', stack: 'staging', prefix: 'sam"; x' },
-    ],
-  ])('refuses %s', (_label, input) => {
-    expect(() => planFakeAiUpstream(input)).toThrow(FakeAiUpstreamRefusedError);
+    ['the production environment', 'production', 'prod', 'sam'],
+    ['a production stack under staging credentials', 'staging', 'prod', 'sam'],
+    ['a production-looking prefix', 'staging', 'staging', 'sam-prod'],
+    ['a fork production stack with an unmapped name', 'main', 'main', 'fork'],
+    ['an unknown stack under staging credentials', 'staging', 'staging3', 'sam3'],
+    ['a staging stack under other credentials', 'development', 'staging', 'sam'],
+    ['a prefix that is not a plain name', 'staging', 'staging', 'sam"; x'],
+  ])('refuses %s', (_label, credentialEnvironment, stack, prefix) => {
+    expect(() => planFakeAiUpstream({ credentialEnvironment, stack, prefix })).toThrow(
+      FakeAiUpstreamRefusedError
+    );
   });
 });
 

@@ -10,7 +10,8 @@
  *
  * What is sent: the gateway's own auth (`cf-aig-authorization`, the same token real gateway calls
  * use, which the gateway consumes), the usage metadata, the requested cost, and a per-token custom
- * cost so the gateway logs a price for a provider it has no price table for. Provider keys are
+ * cost so the gateway logs a price for a provider it has no price table for (verified on staging,
+ * 2026-11-28: without it the gateway logs the tokens at $0), plus `cf-aig-skip-cache`. Provider keys are
  * never sent: every other header is dropped. The gating header is not sent from here; the custom
  * provider's config adds it (`scripts/deploy/fake-ai-upstream.ts`).
  */
@@ -22,6 +23,7 @@ import {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import type { AiUpstreamFetch } from './ai-test-upstream';
 
 const GATEWAY_HOST = 'gateway.ai.cloudflare.com';
@@ -79,16 +81,14 @@ export function testUpstreamCustomCost(modelId: string): string | null {
 
 function requestModel(body: RequestInit['body']): string | null {
   if (typeof body !== 'string') return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(body) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const model = (parsed as Record<string, unknown>).model;
-      return typeof model === 'string' ? model : null;
-    }
+    parsed = JSON.parse(body) as unknown;
   } catch {
     return null;
   }
-  return null;
+  const model = maybeJsonRecord(parsed)?.model;
+  return typeof model === 'string' ? model : null;
 }
 
 function refused(reason: string): Response {
@@ -121,6 +121,9 @@ export function gatewayTestUpstreamFetch(
       if (value !== null) headers.set(name, value);
     }
     headers.set(AI_TEST_UPSTREAM_COST_HEADER, String(costPerCallUsd));
+    // Canned replies make identical requests likely; a gateway cache hit logs $0 and would let a
+    // repeated call through the cap unmetered (seen on staging, 2026-11-28).
+    headers.set('cf-aig-skip-cache', 'true');
     const model = requestModel(init.body);
     const customCost = model ? testUpstreamCustomCost(model) : null;
     if (customCost) headers.set('cf-aig-custom-cost', customCost);

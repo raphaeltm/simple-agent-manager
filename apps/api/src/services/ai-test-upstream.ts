@@ -24,11 +24,11 @@
  *   the gateway URL's provider segment is swapped for the staging-only fake's custom provider
  *   (`AI_TEST_UPSTREAM_GATEWAY_PROVIDER`, `ai-test-upstream-gateway.ts`), which the deploy pipeline
  *   creates and names on staging stacks only. No provider key is sent. Without that var the real
- *   upstream is used. Passthrough routes
- * (`/ai/proxy/:wstoken/*`) and Workers AI models are not faked.
+ *   upstream is used.
+ *
+ * Passthrough routes (`/ai/proxy/:wstoken/*`) and Workers AI models are not faked.
  */
-import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
-import { buildFakeUpstreamResponse } from '@simple-agent-manager/ai-proxy';
+import { buildFakeUpstreamResponse, hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';

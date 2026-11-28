@@ -16,30 +16,20 @@ import {
   FAKE_UPSTREAM_TEXT,
 } from '@simple-agent-manager/ai-proxy';
 import { handleFakeAiUpstreamRequest } from '@simple-agent-manager/ai-proxy/internal/ai-test-upstream-worker';
-import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
-import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import worker from '../../src/index';
-import { updateAdminSettings } from '../../src/services/admin-settings-mutations';
-import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
-import { signCallbackToken } from '../../src/services/jwt';
-import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  CLAUDE_MODEL,
+  nativeMessages,
+  OPENAI_MODEL,
+  testUpstreamHarness,
+} from './helpers/ai-test-upstream';
 
-const bindings = env as unknown as Env;
 const PREFIX = `aitestgw-${Date.now()}`;
-const ADMIN_ID = `${PREFIX}-admin`;
 const GATEWAY_TOKEN = 'test-gateway-token';
 const PROVIDER = 'custom-sam-test-upstream';
 const REAL_PROVIDER_TEXT = 'real provider answered';
-
-const CLAUDE_MODEL = PLATFORM_AI_MODELS.find(
-  (model) => model.provider === 'anthropic' && model.costPer1kOutputTokens >= 0.015
-)!;
-const OPENAI_MODEL = PLATFORM_AI_MODELS.find(
-  (model) => model.provider === 'openai' && model.costPer1kOutputTokens >= 0.008
-)!;
 
 /** The staging shape: an AI Gateway, the deploy flag and the fake's custom provider. */
 const STAGING_ENV: Partial<Env> = {
@@ -109,58 +99,7 @@ afterEach(() => {
   fetchSpy.mockRestore();
 });
 
-async function setSettings(
-  changes: Parameters<typeof updateAdminSettings>[1]['changes']
-): Promise<void> {
-  await seedUser(ADMIN_ID);
-  await updateAdminSettings({ ...bindings, ...STAGING_ENV }, { actorUserId: ADMIN_ID, changes });
-  invalidateAdminSettings(bindings);
-}
-
-async function seedCaller(suffix: string): Promise<{ userId: string; token: string }> {
-  const userId = `${PREFIX}-${suffix}`;
-  const workspaceId = `${PREFIX}-ws-${suffix}`;
-  await seedUser(userId);
-  const nodeId = `${PREFIX}-node-${suffix}`;
-  await seedNode(nodeId, userId);
-  await seedWorkspace(workspaceId, nodeId, userId, { status: 'running' });
-  return {
-    userId,
-    token: await signCallbackToken(workspaceId, bindings, { callbackGeneration: null }),
-  };
-}
-
-async function call(
-  path: string,
-  token: string,
-  body: Record<string, unknown>,
-  overrides: Partial<Env> = STAGING_ENV
-): Promise<Response> {
-  const ctx = createExecutionContext();
-  const response = await worker.fetch(
-    new Request(`https://api.${bindings.BASE_DOMAIN}${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    }),
-    { ...bindings, ...overrides },
-    ctx
-  );
-  const text = await response.text();
-  await waitOnExecutionContext(ctx);
-  return new Response(text, { status: response.status, headers: response.headers });
-}
-
-const nativeMessages = (stream: boolean) => ({
-  model: CLAUDE_MODEL.id,
-  max_tokens: 64,
-  stream,
-  messages: [{ role: 'user', content: 'hello' }],
-});
+const { setSettings, seedCaller, call } = testUpstreamHarness(PREFIX, STAGING_ENV);
 
 function gatewayProviders(): string[] {
   return seen.map((entry) => new URL(entry.url).pathname.split('/')[4] ?? '');

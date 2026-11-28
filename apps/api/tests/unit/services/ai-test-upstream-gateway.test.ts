@@ -84,6 +84,7 @@ describe('gatewayTestUpstreamFetch', () => {
     expect(headers.get('cf-aig-authorization')).toBe('Bearer gw');
     expect(headers.get('cf-aig-metadata')).toBe('{"userId":"u"}');
     expect(headers.get('x-sam-test-upstream-cost-usd')).toBe('0.25');
+    expect(headers.get('cf-aig-skip-cache')).toBe('true');
     // No catalog price for this model: no custom cost is invented.
     expect(headers.get('cf-aig-custom-cost')).toBeNull();
   });
