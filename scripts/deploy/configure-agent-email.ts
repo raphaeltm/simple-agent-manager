@@ -77,6 +77,11 @@ export type AgentEmailOutcome =
 export interface ConfigureAgentEmailOptions {
   zoneId: string;
   baseDomain: string;
+  /**
+   * Use the sending subdomain only if it already exists: never onboard one, never write a DNS
+   * record. An adopted installation deploys this way, so a takeover creates nothing.
+   */
+  existingOnly?: boolean;
 }
 
 export function agentEmailDomain(baseDomain: string): string {
@@ -237,6 +242,21 @@ export async function configureAgentEmail(
   const denied = await probeAccess(api, zoneId);
   if (denied) return { status: 'skipped', reason: denied };
 
+  if (options.existingOnly) {
+    const existing = await findSendingSubdomain(api, zoneId, domain);
+    if (!existing)
+      return {
+        status: 'skipped',
+        reason: `${domain} is not set up for sending, and this deploy does not set it up`,
+      };
+    return {
+      status: 'prepared',
+      domain,
+      writes: api.writes,
+      sendingVerified: existing.enabled === true,
+    };
+  }
+
   const zone = await api.call<{ name: string }>('GET', `/zones/${zoneId}`);
   const apex = normalizeName(zone.name);
   const apexMailBefore = await listMailRecords(api, zoneId, apex);
@@ -277,6 +297,7 @@ async function main(): Promise<void> {
   const outcome = await configureAgentEmail(fetchRequest(requireEnv('CF_API_TOKEN')), {
     zoneId: requireEnv('CF_ZONE_ID'),
     baseDomain: requireEnv('BASE_DOMAIN'),
+    existingOnly: process.env.AGENT_EMAIL_EXISTING_ONLY?.trim().toLowerCase() === 'true',
   });
   writeAgentEmailMarker(outcome);
   if (outcome.status === 'prepared') {

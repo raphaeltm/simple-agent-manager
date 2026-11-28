@@ -73,6 +73,16 @@ const originCaCert = new cloudflare.OriginCaCertificate(
   }
 );
 
+/**
+ * The certificate's Cloudflare ID, as a plain output. An ID is not a secret: it names the
+ * certificate, and revoking it needs the account's Origin CA permission. It is recorded so that
+ * the change retiring this certificate (decision D3, tasks/backlog/2026-11-26-retire-origin-ca-key.md)
+ * can revoke exactly this certificate with `pulumi stack output originCaCertificateId`, without
+ * listing resource ids (`--show-ids` is banned: rule 83) or matching on hostnames, which per-node
+ * certificates share.
+ */
+export const originCaCertificateId = originCaCert.id;
+
 // Export as secret outputs
 export const originCaCertPem = pulumi.secret(originCaCert.certificate);
 export const originCaKeyPem = pulumi.secret(originCaKey.privateKeyPem);

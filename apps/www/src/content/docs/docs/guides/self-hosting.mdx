@@ -805,6 +805,8 @@ If you enabled GitLab in platform configuration, create a test project from a Gi
 
 ## Updating an Existing Self-Hosted Instance
 
+To stop deploying from GitHub Actions altogether, an installation service in your Cloudflare account can take over this instance and update it from then on: see [Move an existing SAM to the installer](/docs/guides/installer/#move-an-existing-sam-to-the-installer).
+
 Pushing upstream changes to your fork's `main` branch does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
 
 Before you update, read the **For self-hosters & admins** notes in [Recent Product Changes](/docs/guides/recent-product-changes/) for every cycle since your last update. They list new and changed settings, and from the 23–29 September 2026 cycle on, they also say whether updating needs any action from you.

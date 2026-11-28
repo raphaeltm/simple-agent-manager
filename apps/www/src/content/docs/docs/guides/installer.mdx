@@ -134,6 +134,136 @@ your update** shows which version it would install; select **Approve and deploy 
 Updates only move forward to newer releases. An update changes SAM's code, not its data: it is not
 a database rollback, so rolling back to an older version isn't offered.
 
+## Move an existing SAM to the installer
+
+If your SAM was deployed some other way, for example from a GitHub fork by its **Deploy Production**
+workflow, an installation service can take it over. From then on you update it from the service.
+Your fork's workflows are no longer needed, and they must not run again: a later **Deploy
+Production** or **Update Self-Hosted Instance** run would deploy the fork's code and its GitHub
+Environment settings over your SAM (`.github/workflows/deploy-reusable.yml`), undoing updates made
+through the service.
+
+1. In the installer, choose the account and the domain your SAM runs on.
+2. Open **This domain already runs SAM**, tick **Take over the SAM already running here** and enter
+   its deploy-state passphrase: the `PULUMI_CONFIG_PASSPHRASE` the deployment was set up with. It
+   passes through the installer, which drops its copy at handoff, and is then kept only as a secret
+   of the installation service in your account. A wrong passphrase stops the takeover at its first
+   check, before it reads or changes your deployment (`refuseUnopenableState`). The passphrase
+   opens your deploy state, which may still hold copies of your keys, so enter it only at an
+   installer you trust: check the address, or
+   [host the installer yourself](#host-the-installer-yourself). The administrator email on the form
+   is not used to change who administers your SAM; it is only shown on your installation service.
+3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its
+   deploy-state bucket**. Otherwise leave it empty.
+4. **Review** finds the deployment from its API Worker route (`<prefix>-api-<stack>`) and its assets
+   bucket (`<prefix>-<stack>-assets`), and its deploy state in the bucket you named or else in
+   `<prefix>-pulumi-state` or `<prefix>-pulumi-state-<environment>`
+   (`previewAdoption`, `apps/installer/src/adoption-plan.ts`). It shows what it will take over. If
+   it can't identify exactly one deployment and one deploy-state bucket, it stops there: for
+   example when the bucket you named does not exist, or when both usual names exist and you named
+   neither.
+5. Create the installation service, open it, then tick **Check and take over this existing
+   installation** and select **Take over SAM**.
+6. When the takeover has finished, disable both workflows in the fork (**Actions**, select the
+   workflow, **Disable workflow**), or archive the fork.
+7. Retire the fork's credentials once you have checked that your SAM works. Your SAM no longer uses
+   the Cloudflare API token and R2 access key the fork deployed with: the takeover gave its API
+   Worker the installation service's own token and storage key (`CF_API_TOKEN`, `R2_ACCESS_KEY_ID`
+   and `R2_SECRET_ACCESS_KEY` in `scripts/deploy/configure-secrets.sh`). Revoke the old ones in
+   Cloudflare and delete the secrets from the fork's GitHub Environment, including its copy of the
+   passphrase. One exception: other Worker secrets are left as they are, so if the same token was
+   also set as `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` or `CF_AIG_TOKEN`, replace those first.
+   Keep your own copy of the passphrase somewhere safe; the service cannot show it back to you.
+
+The takeover deploys the installer's approved source over your deployment. It first checks that
+this creates, replaces or deletes none of your resources, and it keeps your keys, settings and
+users (`scripts/deploy/installer-engine-adoption.ts`). The few settings the deploy applies outside
+that check are listed under "What the deploy itself applies" below:
+
+- **It stops before reading or changing your deployment** when the passphrase does not open the
+  deploy state (`refuseUnopenableState`). Start the takeover again from the installer with the right
+  one.
+- **It stops before changing your deployment** while forced setup is switched on
+  (`SETUP_FORCE=true`, `refuseForcedSetup`). That switch reopens the setup page for account
+  recovery. A takeover would switch it off under you, and keeping it on would leave an emergency
+  switch on for good. Finish the recovery and remove it first.
+- **It stops before changing your deployment** when your SAM still keeps `AI_PROXY_ENABLED` or
+  `AI_PROXY_DEFAULT_MODEL` as a Worker secret, as releases from before those became ordinary
+  settings did (`refuseShadowedSettings`). Every deploy deletes those secrets, and the service
+  cannot read one to keep its value. Update your SAM once the way it was deployed, then take over.
+- **It stops before changing your deployment** when your SAM has no active administrator, which
+  means its first-run setup was never finished (`refuseWithoutOwner`). A takeover binds no owner
+  and hands over no setup token. Finish setup on the existing deployment first, or install a new
+  SAM instead.
+- **It stops before changing your deployment** when one of your SAM's two databases (the main one
+  or the observability one) is newer than the approved source (it has migrations the source lacks,
+  `refuseRollback`), because the older code could not run on it. Update your SAM the way it was deployed first, or wait for the next SAM release. This
+  check is on the database, not on the code: a SAM that runs newer code on the same database is
+  replaced by the approved source you reviewed.
+- **It stops before changing your deployment or its deploy state** when a preview (with a
+  read-only refresh) would create, replace or delete any resource, or change one in place, and
+  lists them under **Technical details** (`refusedTakeoverSteps`). The one in-place change it
+  allows is to the Pages project's deployment records, which change with every web deploy; a
+  change to anything else on it, such as its production branch, stops the takeover. The same
+  check runs again immediately before the change is applied.
+- **It never creates** a deploy-state bucket or stack: a missing one stops the takeover.
+- **It writes nothing to your deploy-state bucket until its checks pass.** The takeover run keeps
+  no build cache there (`openEngineBuildCache` is off for it), so a takeover that stops leaves the
+  bucket as it found it. Later updates do keep their build cache in that bucket.
+- **Your keys stay**: the installation keys the API Worker holds (`ENCRYPTION_KEY`, the JWT, signing
+  and VAPID keys) are never read, replaced or created by a takeover or by any later update; a
+  deploy only checks, by name, that they are there (`scripts/deploy/installation-keys.ts`). If
+  your deploy state still holds old copies of them, the takeover removes those copies from the
+  state once the Worker is shown to have every key (`retireKeyResources`), and both resource
+  checks leave them out, since they exist only in the state. A `VAPID_SUBJECT` you set yourself is
+  kept as it is.
+- **Your settings stay**: Worker settings your deployment runs with that differ from SAM's defaults,
+  such as `REQUIRE_APPROVAL=false`, are read back from the deployed Worker and kept, on the takeover
+  and on every update (`carryDeployedVars`). A setting equal to the default is not kept. One limit:
+  the service cannot tell a setting you chose from a default that a later release has since
+  changed, so a setting whose default changes keeps its old value on your SAM. Agent sign-in trust
+  and other Worker secrets, such as your GitHub App credentials, are left untouched. The databases
+  keep their read-replication mode, on the takeover and on every update, because a fork that set
+  `D1_READ_REPLICATION_MODE` did so in a GitHub Environment the service cannot see.
+- **Your users stay**: no owner email is set and no setup token is handed out, because the
+  deployment already has its administrators.
+
+- **Your email setup stays**: a SAM that sends email (its API Worker has the `AGENT_EMAIL` binding,
+  `deployedAgentEmail`) keeps it, using the sending subdomain that exists. A SAM without it is not
+  given it: the takeover and later updates never onboard `agents.<your domain>` for sending or
+  write its DNS records, as a new installation would. The service has no way to turn email on for
+  such a SAM yet.
+
+**What the deploy itself applies.** Besides the Worker code, the web app and any new database
+migrations, deploying the approved source applies the service configuration that source needs,
+outside the resource check above: the upload CORS rule on the assets bucket
+(`configure-r2-cors.sh`), the AI Gateway if your account does not have it yet
+(`configure-ai-gateway.sh`), and the tail Worker. A fork's own deploy applies the same.
+
+**What is not carried.** The service reads your settings from the deployed Worker, so it cannot
+see settings that live only in your fork's GitHub Environment and never reach the Worker as a
+readable value. These return to SAM's defaults on the takeover:
+
+- `SANDBOX_CONTAINER_MAX_INSTANCES`, `VM_AGENT_CONTAINER_MAX_INSTANCES` and
+  `DEPLOY_BUILDER_INSTANCE_TYPE` (container limits and the builder's instance type;
+  `DEPLOY_BUILDER_MAX_INSTANCES` is carried);
+- the web app's build-time `VITE_*` variables;
+- an explicit `ARTIFACTS_BINDING_ENABLED`, which goes back to automatic detection.
+
+Pulumi stack options you set, such as storage retention periods or the Pages production branch,
+are not reset: the takeover stops and names the resource instead.
+
+The check covers your infrastructure and your database, not your code: the takeover deploys SAM's
+approved source, so changes you made to the code in a fork are not kept.
+
+Takeover needs a SAM release that supports it: the service refuses a source whose installer
+protocol does not declare `adoption`, so an older engine can never install a second SAM over yours.
+The installation service's storage credential covers the whole deploy-state bucket. A deployment
+whose deploy state lives in another installation's bucket (such as a secondary staging
+installation) is not found under the bucket names the takeover looks for, so it is not taken over
+by default. Naming that shared bucket yourself does allow it, and the service then holds the key
+to the other installation's state as well: give each deployment its own bucket first.
+
 ## Remove an installation
 
 There is no automatic uninstall. To remove SAM, delete its Workers, storage and DNS records in the

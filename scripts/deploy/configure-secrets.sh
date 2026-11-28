@@ -74,6 +74,15 @@ set_worker_secret() {
   local environment="$3"
   local is_required="${4:-false}"
 
+  # An adopted installation keeps a secret the Worker already holds when this script would only
+  # derive a default for it: the value may be a GitHub-secret override this deploy cannot see
+  # (installer-engine-adoption.ts, PRESERVED_KEY_SECRETS). Installation keys need no such list:
+  # nothing here writes them.
+  if [[ ",${PRESERVE_EXISTING_WORKER_SECRETS:-}," == *",$secret_name,"* ]]; then
+    echo "Keeping existing $secret_name"
+    return 0
+  fi
+
   if [ -z "$secret_value" ]; then
     if [ "$is_required" = "true" ]; then
       echo -e "${RED}❌ Required secret $secret_name is not set${NC}" >&2

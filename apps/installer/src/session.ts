@@ -271,6 +271,7 @@ export class InstallerSession {
     delete session.token;
     delete session.tokenExpires;
     delete session.credentials;
+    delete session.adoptionPassphrase;
     await this.ctx.storage.put('session', session);
     return new Response(
       installerShell.before +

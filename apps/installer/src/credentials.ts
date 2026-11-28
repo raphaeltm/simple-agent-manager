@@ -1,3 +1,4 @@
+import { adoptionCredentialBuckets } from './adoption-plan';
 import { cloudflare, CloudflareError } from './cloudflare';
 import { type InstallationConfig, validateInstallationConfig } from './installation-plan';
 import { digest, randomSecret } from './security';
@@ -45,6 +46,11 @@ export interface CredentialOptions {
   cleanupSignal?: AbortSignal;
   cleanupTimeoutMs?: number;
   authorityExpiresAt?: number;
+  /**
+   * A takeover's existing deploy-state passphrase, supplied by its owner. Without it the
+   * installation gets a fresh random passphrase for its new state.
+   */
+  pulumiPassphrase?: string;
 }
 const ACCOUNT_SCOPE = 'com.cloudflare.api.account';
 const ZONE_SCOPE = 'com.cloudflare.api.account.zone';
@@ -170,14 +176,14 @@ export async function installationCredentialBuckets(
   installationId: string,
   options: CredentialOptions = {}
 ): Promise<string[]> {
+  const maintenanceBucket = options.maintenanceBucket ?? `${installationId}-builds`;
   const prefix = `s${(await digest(config.baseDomain)).slice(0, 6)}`;
   const environment = options.environment ?? 'production';
   const stack = environment === 'production' ? 'prod' : environment;
-  const buckets = [
-    `${prefix}-pulumi-state-${environment}`,
-    `${prefix}-${stack}-assets`,
-    options.maintenanceBucket ?? `${installationId}-builds`,
-  ];
+  // A takeover keeps the existing deployment's names (adoption-plan.ts).
+  const buckets = config.adoption
+    ? adoptionCredentialBuckets(config.adoption, maintenanceBucket)
+    : [`${prefix}-pulumi-state-${environment}`, `${prefix}-${stack}-assets`, maintenanceBucket];
   if (buckets.some((name) => !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(name)))
     throw new Error('Invalid installation bucket');
   return [...new Set(buckets)];
@@ -311,7 +317,7 @@ export async function createInstallationCredentials(
       runtimeToken: runtime.value,
       r2AccessKeyId: storage.id,
       r2SecretAccessKey: await digest(storage.value),
-      pulumiPassphrase: randomSecret(),
+      pulumiPassphrase: options.pulumiPassphrase ?? randomSecret(),
       tokenIds: [...journal],
     };
   } catch (error) {
