@@ -196,7 +196,7 @@ describe('ensureCustomProvider', () => {
 });
 
 describe('deploy workflow step', () => {
-  it('runs only for staging deploys, hands the token to the script through env, and never blocks', () => {
+  it('runs only for staging deploys, hands the token to the script through env, and fails closed', () => {
     const workflow = parse(
       readFileSync(new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url), 'utf8')
     ) as { jobs: Record<string, { steps?: Array<Record<string, unknown>> }> };
@@ -205,7 +205,7 @@ describe('deploy workflow step', () => {
     expect(step).toBeDefined();
     expect(String(step!.if)).toContain("inputs.environment == 'staging'");
     expect(step!.run).toBe('pnpm tsx scripts/deploy/fake-ai-upstream.ts');
-    expect(step!['continue-on-error']).toBe(true);
+    expect(step!['continue-on-error']).toBeUndefined();
     const env = step!.env as Record<string, string>;
     expect(env.CLOUDFLARE_API_TOKEN).toBe('${{ secrets.CF_API_TOKEN }}');
     expect(env.CREDENTIAL_ENVIRONMENT).toBe('${{ inputs.environment }}');

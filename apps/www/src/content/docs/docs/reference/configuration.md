@@ -2400,7 +2400,7 @@ On Cloudflare installs only the staging deploy pipeline sets these vars
 "Deploy staging fake AI upstream" step (`scripts/deploy/fake-ai-upstream.ts`) publishes
 `<prefix>-fake-ai-<stack>` on workers.dev with no route and points the custom provider
 `<prefix>-test-upstream` at it, idempotently, with the deploy token passed straight to wrangler and
-the Cloudflare API. The step only warns on failure, and the two vars are set on staging either way, so
-if it failed, allowlisted calls fail at the gateway (no real key is spent) until the next staging
-deploy. To use it on staging, list the test user in `aiProxy.testUpstreamUserIds`; to switch it
+the Cloudflare API. A failure fails the staging deploy; the two vars are written by the config sync
+before the step runs, so until a deploy succeeds, allowlisted calls fail at the gateway (no real key
+is spent). To use it on staging, list the test user in `aiProxy.testUpstreamUserIds`; to switch it
 off, empty that list.

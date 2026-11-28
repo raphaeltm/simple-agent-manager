@@ -55,8 +55,9 @@ gated by a fixed non-secret header, created only by the staging pipeline.
   - an identical repeat was a gateway **cache hit at $0**, so faked calls now send
     `cf-aig-skip-cache: true`.
 - Reported on `feature.selfhost-landing` (seq 528).
-- Note: the API vars are emitted on staging stacks even if the (continue-on-error) step fails; then
-  allowlisted calls fail at the gateway and no real key is spent (documented in the config reference).
+- The step fails the staging deploy on error (deploy-safety forbids `continue-on-error` in the
+  deploy workflow). The API vars are written by the config sync before it, so a failed step leaves
+  allowlisted calls failing at the gateway with no real key spent (documented in the config reference).
 
 ## Acceptance criteria
 

@@ -2071,11 +2071,10 @@ jobs:
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       # Staging only: the test-only fake AI upstream on workers.dev plus its AI Gateway custom
-      # provider (scripts/deploy/fake-ai-upstream.ts; the script refuses any other stack). A
-      # failure is a warning: it is test infrastructure and must not block a staging deploy.
+      # provider (scripts/deploy/fake-ai-upstream.ts; the script refuses any other stack). It fails
+      # the deploy like every other step: a half-configured fake must not pass silently.
       - name: Deploy staging fake AI upstream
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && inputs.environment == 'staging' }}
-        continue-on-error: true
         run: pnpm tsx scripts/deploy/fake-ai-upstream.ts
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
