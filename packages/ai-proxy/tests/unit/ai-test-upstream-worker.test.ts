@@ -90,12 +90,17 @@ describe('fake AI upstream Worker: gating', () => {
   );
 
   it('rejects an out-of-range cost and a body over the limit', async () => {
-    for (const cost of ['-1', '11', 'abc']) {
+    for (const cost of ['-1', '100.01', 'abc']) {
       const response = await handleFakeAiUpstreamRequest(
         request('/v1/messages', messages(), { [AI_TEST_UPSTREAM_COST_HEADER]: cost })
       );
       expect(response.status).toBe(400);
     }
+    // The maximum itself is accepted: it is the admin setting's maximum too (10,000 cents).
+    const atMax = await handleFakeAiUpstreamRequest(
+      request('/v1/messages', messages(), { [AI_TEST_UPSTREAM_COST_HEADER]: '100' })
+    );
+    expect(atMax.status).toBe(200);
     const big = await handleFakeAiUpstreamRequest(
       request('/v1/messages', {
         model: CLAUDE.id,

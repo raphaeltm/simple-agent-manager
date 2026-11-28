@@ -38,7 +38,7 @@ gated by a fixed non-secret header, created only by the staging pipeline.
 - [x] Spike: one gateway call, read logs: tokens, cost, metadata.userId
 - [x] If cost returned: gateway routing in `resolveAiTestUpstream` behind existing gates + allowlist; Worker vars on staging stacks only
 - [x] Tests: non-allowlisted user reaches real upstream; production Env never routes
-- [ ] Staging proof (pending; must span one hourly cron cycle): $1 ceiling, $0.40 calls, refusal on 3rd/4th call via cron/estimate path, admin usage page, switch off
+- [x] Staging proof (spanned the 07:30Z hourly cron): $1 ceiling, $0.40 calls, refusal on 3rd/4th call via cron/estimate path, admin usage page, switch off
 - [x] Docs: configuration reference (the self-host README is not touched: the gateway fake is staging-only, and the VM-box text there is unchanged)
 
 ## Spike results (2026-11-27/28)
@@ -63,4 +63,19 @@ gated by a fixed non-secret header, created only by the staging pipeline.
 
 - [x] Fake Worker exists only on staging workers.dev, created by the pipeline
 - [x] Spike result reported to coordinator
-- [ ] Live proof or recorded decision to drop
+- [x] Live proof or recorded decision to drop
+
+## Live proof (2026-11-28 06:53-07:33Z, staging)
+
+- Admin ceiling $1, `testUpstreamCostPerCallCents=40`, secondary test user allowlisted (the primary
+  user's Claude runs on a pinned own credential, so it never reaches the proxy). Instant Claude Code
+  session, `agent_provider_mode=sam-proxy`, credential `platform_proxy:anthropic`.
+- First prompt: 3 fake calls, gateway logs 3 x `custom-sam-test-upstream` $0.40 = $1.20,
+  `metadata.userId` set; reply is the canned text.
+- Second prompt: 4th call refused before leaving the Worker, chat shows `API Error: Request rejected
+(429) · Administrator monthly AI spending limit reached`; no new gateway log.
+- Settings > Usage: $1.20 / $1.00 (administrator limit). Admin > Analytics AI Usage shows the calls.
+- Before 07:30Z no KV total (refusal from the estimate); after the cron, KV `costUsd 1.200015` from
+  gateway logs and the budget API still reports exceeded.
+- Switched off: allowlist [], ceiling 0, test user's daily limits null, temporary profile deleted,
+  both test workspaces deleted, lease released.

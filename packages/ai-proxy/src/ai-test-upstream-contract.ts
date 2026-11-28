@@ -15,5 +15,9 @@ export const AI_TEST_UPSTREAM_GATE_VALUE = 'sam-fake-ai-upstream-v1';
 export const AI_TEST_UPSTREAM_COST_HEADER = 'x-sam-test-upstream-cost-usd';
 /** The same as a query parameter, for hand-made calls. The header wins when both are present. */
 export const AI_TEST_UPSTREAM_COST_QUERY = 'cost_usd';
-/** Highest cost one fake call may ask for, so a typo cannot produce an absurd usage block. */
-export const AI_TEST_UPSTREAM_MAX_COST_USD = 10;
+/**
+ * Highest cost one fake call may ask for, so a typo cannot produce an absurd usage block. The
+ * admin setting `aiProxy.testUpstreamCostPerCallCents` takes its maximum from this, so every
+ * value an admin can save is one the Worker accepts.
+ */
+export const AI_TEST_UPSTREAM_MAX_COST_USD = 100;
