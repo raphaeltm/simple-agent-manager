@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
@@ -44,7 +45,10 @@ func ClassifyProviderLimit(err error, now time.Time) *ProviderLimitError {
 		if request.Code != -32603 {
 			return nil
 		}
-		data, _ := request.Data.(map[string]any)
+		var data map[string]any
+		if json.Unmarshal(request.Data, &data) != nil {
+			data = nil
+		}
 		if data["errorKind"] == "authentication_failed" || data["codexErrorInfo"] == "unauthorized" {
 			return nil
 		}

@@ -164,7 +164,7 @@ func TestExtractMessages_Plan_EmptyEntries(t *testing.T) {
 }
 
 func TestExtractMessages_ToolCall(t *testing.T) {
-	line := 42
+	line := int64(42)
 	notif := acpsdk.SessionNotification{
 		SessionId: "sess-1",
 		Update: acpsdk.SessionUpdate{
@@ -248,8 +248,8 @@ func TestExtractMessages_ToolCallUpdate_WithStatus(t *testing.T) {
 		Update: acpsdk.SessionUpdate{
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-456",
-				Status:     &status,
-				Title:      &title,
+				Status:     acpsdk.PatchFromPtr(&status),
+				Title:      acpsdk.PatchFromPtr(&title),
 			},
 		},
 	}

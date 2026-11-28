@@ -295,17 +295,18 @@ func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotif
 			extractToolNameFromMeta(update.ToolCall.Meta),
 		)
 	case update.ToolCallUpdate != nil:
+		updateMeta, _ := update.ToolCallUpdate.Meta.Value()
 		// Status is a patch field. Absent means "unchanged", which for lease
 		// purposes is treated the same as a non-terminal update.
 		kind := ""
-		if update.ToolCallUpdate.Kind != nil {
-			kind = string(*update.ToolCallUpdate.Kind)
+		if update.ToolCallUpdate.Kind.Ptr() != nil {
+			kind = string(*update.ToolCallUpdate.Kind.Ptr())
 		}
 		return h.applyACPToolCallStatus(
 			string(update.ToolCallUpdate.ToolCallId),
-			update.ToolCallUpdate.Status,
+			update.ToolCallUpdate.Status.Ptr(),
 			kind,
-			extractToolNameFromMeta(update.ToolCallUpdate.Meta),
+			extractToolNameFromMeta(updateMeta),
 		)
 	default:
 		return false

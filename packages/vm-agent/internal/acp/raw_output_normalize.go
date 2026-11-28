@@ -19,6 +19,13 @@ type normalizedToolOutput struct {
 // bounded content, while arbitrary raw fields and every rawInput remain outside
 // the durable generic-tool path.
 func normalizeRawToolOutput(value any) normalizedToolOutput {
+	if raw, ok := value.(json.RawMessage); ok {
+		var decoded map[string]any
+		if json.Unmarshal(raw, &decoded) != nil {
+			return normalizedToolOutput{}
+		}
+		value = decoded
+	}
 	output, ok := value.(map[string]any)
 	if !ok || len(output) == 0 {
 		return normalizedToolOutput{}

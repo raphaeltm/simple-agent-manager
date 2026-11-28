@@ -460,11 +460,11 @@ func permissionDetail(
 		return acpPermissionDetail{}, nil, errors.New("permission options are empty or exceed the configured limit")
 	}
 	detail := acpPermissionDetail{ToolCallID: string(params.ToolCall.ToolCallId)}
-	if params.ToolCall.Title != nil {
-		detail.Title = *params.ToolCall.Title
+	if params.ToolCall.Title.Ptr() != nil {
+		detail.Title = *params.ToolCall.Title.Ptr()
 	}
-	if params.ToolCall.Kind != nil {
-		detail.ToolKind = string(*params.ToolCall.Kind)
+	if params.ToolCall.Kind.Ptr() != nil {
+		detail.ToolKind = string(*params.ToolCall.Kind.Ptr())
 	}
 	detail.Options = make([]acpPermissionOption, 0, len(params.Options))
 	optionIDs := make(map[string]struct{}, len(params.Options))

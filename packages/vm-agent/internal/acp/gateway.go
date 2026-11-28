@@ -565,20 +565,23 @@ func truncate(s string, maxLen int) string {
 
 // applyLineLimit applies Line and Limit parameters to file content for partial reads.
 // Line is 1-based. Returns the selected portion of content.
-func applyLineLimit(content string, line *int, limit *int) string {
+func applyLineLimit(content string, line *int64, limit *int64) string {
 	if line == nil && limit == nil {
 		return content
 	}
 	lines := strings.Split(content, "\n")
 	startLine := 0
 	if line != nil && *line > 1 {
-		startLine = *line - 1
+		if *line > int64(len(lines)) {
+			return ""
+		}
+		startLine = int(*line - 1)
 		if startLine >= len(lines) {
 			return ""
 		}
 		lines = lines[startLine:]
 	}
-	if limit != nil && *limit > 0 && *limit < len(lines) {
+	if limit != nil && *limit > 0 && *limit < int64(len(lines)) {
 		lines = lines[:*limit]
 	}
 	return strings.Join(lines, "\n")

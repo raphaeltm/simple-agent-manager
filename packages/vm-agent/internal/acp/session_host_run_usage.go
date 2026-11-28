@@ -296,7 +296,7 @@ func promptTurnTokenUsage(resp acpsdk.PromptResponse, fallbackModel string) []to
 	return []tokenModelPayload{entry}
 }
 
-func quotaModelTokenUsage(meta map[string]any) []tokenModelPayload {
+func quotaModelTokenUsage(meta acpsdk.Meta) []tokenModelPayload {
 	raw, ok := meta["quota"]
 	if !ok {
 		return nil

@@ -253,7 +253,7 @@ func TestSteeringSupportFromInitialize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := steeringSupportFromInitialize(acpsdk.InitializeResponse{
 				AgentInfo: &acpsdk.Implementation{Name: tc.adapter, Version: tc.version},
-				Meta:      tc.meta,
+				Meta:      sdkFixtureMeta(tc.meta),
 			})
 			if got.Advertised != tc.advertised || (got.Advertised && got.PromptRequired) != tc.supported {
 				t.Fatalf("support = %+v, want advertised=%v supported=%v", got, tc.advertised, tc.supported)

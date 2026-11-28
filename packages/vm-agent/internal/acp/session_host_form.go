@@ -18,14 +18,16 @@ func cancelledFormResponse() acpsdk.CreateElicitationResponse {
 	return acpsdk.CreateElicitationResponse{Cancel: &acpsdk.CreateElicitationCancel{Action: "cancel"}}
 }
 
-func supportedFormRequestMeta(meta map[string]any) bool {
+func supportedFormRequestMeta(meta acpsdk.Meta) bool {
 	if len(meta) == 0 {
 		return true
 	}
 	if len(meta) != 1 {
 		return false
 	}
-	codex, ok := formRecord(meta["codex"])
+	var codex map[string]any
+	err := meta.Get("codex", &codex)
+	ok := err == nil && codex != nil
 	if !ok || !formOnlyKeys(codex, "autoResolutionMs") {
 		return false
 	}
@@ -78,7 +80,8 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 	if !ok {
 		return cancelledFormResponse(), nil
 	}
-	if codex, valid := formRecord(params.Form.Meta["codex"]); valid {
+	var codex map[string]any
+	if params.Form.Meta.Get("codex", &codex) == nil && codex != nil {
 		if value, isNumber := codex["autoResolutionMs"].(float64); isNumber && value < float64(config.FormDeadlineMs) {
 			if value <= 0 {
 				return cancelledFormResponse(), nil
@@ -175,9 +178,17 @@ func (h *SessionHost) requestForm(ctx context.Context, generation string,
 		settle(reason)
 		return cancelledFormResponse(), nil
 	}
+	// Content has already passed SAM's schema/primitive validation. Use the
+	// SDK's typed decoder too, so invalid values cancel rather than escape.
+	encodedContent, err := json.Marshal(result.content)
+	var content map[string]acpsdk.ElicitationContentValue
+	if err != nil || json.Unmarshal(encodedContent, &content) != nil {
+		settle("wrapper_cancelled")
+		return cancelledFormResponse(), nil
+	}
 	settle("completed")
 	return acpsdk.CreateElicitationResponse{Accept: &acpsdk.CreateElicitationAccept{
-		Action: "accept", Content: result.content}}, nil
+		Action: "accept", Content: content}}, nil
 }
 
 func (c *sessionHostClient) CreateElicitation(ctx context.Context,

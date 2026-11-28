@@ -73,7 +73,7 @@ func TestCodexProductionClockBounds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			now, _ := time.Parse(time.RFC3339, tc.now)
-			got := ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: "Internal error", Data: map[string]any{"codexErrorInfo": "usageLimitExceeded", "message": message + tc.clock}}, now)
+			got := ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: "Internal error", Data: sdkFixtureJSON(map[string]any{"codexErrorInfo": "usageLimitExceeded", "message": message + tc.clock})}, now)
 			if got == nil {
 				t.Fatal("categorical quota lost")
 			}
@@ -95,12 +95,12 @@ func TestCodexProductionClockBounds(t *testing.T) {
 		if category != "" {
 			data["codexErrorInfo"] = category
 		}
-		if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: "Internal error", Data: data}, now) != nil {
+		if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: "Internal error", Data: sdkFixtureJSON(data)}, now) != nil {
 			t.Fatal("untrusted/auth clock classified")
 		}
 	}
 	for _, text := range []string{"Provider HTTP 429 rate limit", "Internal error: MCP tool said resets 8am (UTC)"} {
-		if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: text, Data: map[string]any{"errorKind": "rate_limit"}}, now) != nil {
+		if ClassifyProviderLimit(&acpsdk.RequestError{Code: -32603, Message: text, Data: sdkFixtureJSON(map[string]any{"errorKind": "rate_limit"})}, now) != nil {
 			t.Fatal("transient/tool text classified")
 		}
 	}

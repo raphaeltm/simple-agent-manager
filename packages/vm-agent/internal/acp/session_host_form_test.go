@@ -100,7 +100,7 @@ func TestFormPinnedSDKWireAndNextPromptOwnership(t *testing.T) {
 	}
 	select {
 	case response := <-agent.responses:
-		if response.Accept == nil || response.Accept.Content["question"] != "Fast" {
+		if response.Accept == nil || response.Accept.Content["question"].String == nil || string(*response.Accept.Content["question"].String) != "Fast" {
 			t.Fatalf("SDK response = %+v", response)
 		}
 	case <-time.After(time.Second):
@@ -164,10 +164,9 @@ func testFormConfig() AcpInteractionRuntimeConfig {
 func fixtureFormRequest() acpsdk.CreateElicitationRequest {
 	request := acpsdk.CreateElicitationRequest{Form: &acpsdk.CreateElicitationForm{Mode: "form", Session: &acpsdk.ElicitationSessionScope{SessionId: "sdk-session-1"}, RequestedSchema: acpsdk.ElicitationSchema{
 		Type: "object",
-		Properties: map[string]any{
-			"question": map[string]any{"type": "string", "oneOf": []any{
-				map[string]any{"const": "Fast", "title": "Fast"},
-				map[string]any{"const": "Slow", "title": "Slow"},
+		Properties: map[string]acpsdk.ElicitationPropertySchema{
+			"question": {String: &acpsdk.ElicitationPropertySchemaString{
+				Type: "string", OneOf: []acpsdk.EnumOption{{Const: "Fast", Title: "Fast"}, {Const: "Slow", Title: "Slow"}},
 			}},
 		},
 		Required: []string{"question"},
@@ -202,7 +201,7 @@ func TestFormRoundTripThroughCloudflareCallbackRegistry(t *testing.T) {
 	}
 	select {
 	case response := <-result:
-		if response.Accept == nil || response.Accept.Content["question"] != "Fast" {
+		if response.Accept == nil || response.Accept.Content["question"].String == nil || string(*response.Accept.Content["question"].String) != "Fast" {
 			t.Fatalf("response = %+v", response)
 		}
 	case <-time.After(time.Second):
@@ -222,7 +221,7 @@ func TestFormUnsupportedAndTaskModeCancelWithoutCreate(t *testing.T) {
 		t.Fatalf("task-mode/no-capability response = %+v", response)
 	}
 	host.ConfigureAcpInteractions(testFormConfig())
-	request.Form.RequestedSchema.Properties["question"] = map[string]any{"type": "string", "pattern": "(a+)+$"}
+	request.Form.RequestedSchema.Properties["question"] = acpsdk.ElicitationPropertySchema{String: &acpsdk.ElicitationPropertySchemaString{Type: "string", Pattern: acpsdk.Ptr("(a+)+$")}}
 	if response, _ := client.CreateElicitation(context.Background(), request); response.Cancel == nil {
 		t.Fatalf("unsupported constraint response = %+v", response)
 	}
@@ -294,7 +293,7 @@ func TestCodexFormAutoResolutionTightensRuntimeDeadline(t *testing.T) {
 	t.Cleanup(host.Stop)
 	host.ConfigureAcpInteractions(testFormConfig())
 	request := fixtureFormRequest()
-	request.Form.Meta = map[string]any{"codex": map[string]any{"autoResolutionMs": float64(100)}}
+	request.Form.Meta = sdkFixtureMeta(map[string]any{"codex": map[string]any{"autoResolutionMs": float64(100)}})
 	started := time.Now()
 	done := make(chan acpsdk.CreateElicitationResponse, 1)
 	go func() {

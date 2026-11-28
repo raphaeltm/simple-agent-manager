@@ -2470,7 +2470,7 @@ func TestSessionUpdate_MarshalError_NonBlocking(t *testing.T) {
 			ToolCall: &acpsdk.SessionUpdateToolCall{
 				ToolCallId: "tool-1",
 				Title:      "Run tool",
-				RawInput:   make(chan int),
+				RawInput:   []byte(`{`),
 			},
 		},
 	}

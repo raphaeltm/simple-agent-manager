@@ -8,7 +8,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 )
 
-func intPtr(n int) *int {
+func intPtr(n int64) *int64 {
 	return &n
 }
 
@@ -18,8 +18,8 @@ func TestApplyLineLimit(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
-		line     *int
-		limit    *int
+		line     *int64
+		limit    *int64
 		expected string
 	}{
 		{
