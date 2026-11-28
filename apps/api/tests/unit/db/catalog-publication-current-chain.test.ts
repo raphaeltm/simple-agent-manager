@@ -10,6 +10,9 @@ const migrations = readdirSync(migrationsDirectory)
   .sort();
 const archiveMigration = '0237_archive_reclaim_pending.sql';
 const catalogMigration = '0239_capacity_catalog_publication.sql';
+// This later migration indexes tables created by the late catalog migration.
+// It cannot belong to the simulated pre-catalog installation.
+const catalogIndexMigration = '0271_project_deletion_foreign_key_indexes.sql';
 
 function apply(db: DatabaseSync, filenames: string[]): void {
   for (const filename of filenames) {
@@ -130,7 +133,9 @@ describe('catalog publication on the current real migration chain', () => {
       db.exec('PRAGMA foreign_keys=ON');
       apply(
         db,
-        migrations.filter((filename) => filename !== catalogMigration)
+        migrations.filter(
+          (filename) => filename !== catalogMigration && filename !== catalogIndexMigration
+        )
       );
       seedIdentity(db);
       insertPool(db, 'published', 'configured-ready', 'complete');
@@ -149,7 +154,7 @@ describe('catalog publication on the current real migration chain', () => {
       const nodesBefore = db.prepare('SELECT * FROM nodes').all();
       const archiveBefore = db.prepare('SELECT * FROM project_data_archive_migrations').all();
 
-      apply(db, [catalogMigration]);
+      apply(db, [catalogMigration, catalogIndexMigration]);
 
       expect(db.prepare('SELECT * FROM tasks').all()).toEqual(tasksBefore);
       expect(db.prepare('SELECT * FROM nodes').all()).toEqual(nodesBefore);

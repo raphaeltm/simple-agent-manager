@@ -187,3 +187,6 @@ parent foreign keys. A parent DELETE checks archived children too; an index move
 canonical table no longer protects the archive. For deletion-cost regressions, apply the shipped
 migration chain with foreign keys enabled and inspect the real route's DELETE plans at realistic
 cardinality. Schema-only fixtures omit retained tables and can hide repeated child-table scans.
+
+Deletion-plan regressions must inspect every issued parent DELETE and its CASCADE descendants.
+Task/event-only assertions miss profile, skill, trigger and final project foreign-key scans.

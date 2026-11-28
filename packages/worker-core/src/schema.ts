@@ -334,6 +334,7 @@ export const credentials = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_credentials_project_id').on(table.projectId),
     userAgentKindUserScope: uniqueIndex('idx_credentials_user_agent_kind_user_scope')
       .on(table.userId, table.agentType, table.credentialKind)
       .where(sql`credential_type = 'agent-api-key' AND project_id IS NULL`),
@@ -390,6 +391,9 @@ export const agentCredentialSetupSessions = sqliteTable(
     completedAt: text('completed_at'),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_agent_credential_setup_sessions_project_id').on(
+      table.projectId
+    ),
     oneActive: uniqueIndex('idx_acss_one_active')
       .on(table.userId, table.agentType)
       .where(
@@ -714,6 +718,9 @@ export const projectAccessRequests = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteInviteLinkIdIdx: index('idx_delete_project_access_requests_invite_link_id').on(
+      table.inviteLinkId
+    ),
     projectRequesterUnique: uniqueIndex('idx_project_access_requests_project_requester').on(
       table.projectId,
       table.requesterUserId
@@ -764,6 +771,7 @@ export const runtimeSecretRequests = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_runtime_secret_requests_project_id').on(table.projectId),
     statusExpiresIdx: index('idx_runtime_secret_requests_status_expires').on(
       table.status,
       table.expiresAt
@@ -1404,6 +1412,8 @@ export const tasks = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteTriggerIdIdx: index('idx_delete_tasks_trigger_id').on(table.triggerId),
+    deleteSkillIdIdx: index('idx_delete_tasks_skill_id').on(table.skillId),
     autoProvisionedNodeIdx: index('idx_tasks_auto_provisioned_node')
       .on(table.autoProvisionedNodeId)
       .where(sql`auto_provisioned_node_id is not null`),
@@ -2432,6 +2442,10 @@ export const workspaceResourceSummaries = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
   },
   (table) => ({
+    deleteSkillIdIdx: index('idx_delete_workspace_resource_summaries_skill_id').on(table.skillId),
+    deleteAgentProfileIdIdx: index('idx_delete_workspace_resource_summaries_agent_profile_id').on(
+      table.agentProfileId
+    ),
     taskIdx: index('idx_workspace_resource_summaries_task').on(table.taskId),
     projectSessionIdx: index('idx_workspace_resource_summaries_project_session').on(
       table.projectId,
@@ -2490,6 +2504,9 @@ export const workspaceResourceChunks = sqliteTable(
     uploadedByNodeId: text('uploaded_by_node_id'),
   },
   (table) => ({
+    deleteSummaryIdIdx: index('idx_delete_workspace_resource_chunks_summary_id').on(
+      table.summaryId
+    ),
     taskIdx: index('idx_workspace_resource_chunks_task').on(table.taskId),
     identityIdx: index('idx_workspace_resource_chunks_identity').on(
       table.projectId,
@@ -2758,6 +2775,7 @@ export const sessionSnapshots = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_session_snapshots_project_id').on(table.projectId),
     failedEvictionRetryIdx: index('idx_session_snapshots_failed_eviction_retry')
       .on(table.updatedAt)
       .where(sql`recovery_status = 'failed' AND eviction_recovery_workspace_id IS NOT NULL`),
@@ -2917,6 +2935,9 @@ export const agentProfilePickerHidden = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_agent_profile_picker_hidden_project_id').on(
+      table.projectId
+    ),
     pk: primaryKey({ columns: [table.userId, table.projectId, table.profileId] }),
     profileIdx: index('idx_agent_profile_picker_hidden_profile').on(table.profileId),
   })
@@ -3608,6 +3629,8 @@ export const triggers = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteSkillIdIdx: index('idx_delete_triggers_skill_id').on(table.skillId),
+    deleteAgentProfileIdIdx: index('idx_delete_triggers_agent_profile_id').on(table.agentProfileId),
     projectNameUnique: uniqueIndex('idx_triggers_project_name').on(table.projectId, table.name),
     cronSweepIdx: index('idx_triggers_cron_sweep')
       .on(table.sourceType, table.status, table.nextFireAt)
@@ -3936,6 +3959,8 @@ export const triggerEmailMessages = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteTriggerIdIdx: index('idx_delete_trigger_email_messages_trigger_id').on(table.triggerId),
+    deleteProjectIdIdx: index('idx_delete_trigger_email_messages_project_id').on(table.projectId),
     inboundUnique: uniqueIndex('idx_trigger_email_messages_inbound')
       .on(table.triggerId, table.messageId)
       .where(sql`direction = 'inbound'`),
@@ -4231,6 +4256,9 @@ export const capacityPools = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteOwnerProjectIdIdx: index('idx_delete_capacity_pools_owner_project_id').on(
+      table.ownerProjectId
+    ),
     defaultInstallationUnique: uniqueIndex('idx_capacity_pools_default_installation')
       .on(table.scope)
       .where(sql`scope = 'installation' AND is_default = 1`),
@@ -4376,6 +4404,9 @@ export const capacityPoolCandidateStaging = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteCapacitySourceIdIdx: index(
+      'idx_delete_capacity_pool_candidate_staging_capacity_source_id'
+    ).on(table.capacitySourceId),
     publicationIdx: index('idx_capacity_candidate_staging_publication').on(
       table.poolId,
       table.capacitySourceId,
@@ -4403,6 +4434,9 @@ export const capacityPoolRefreshes = sqliteTable(
     lastError: text('last_error'),
   },
   (table) => ({
+    deleteOwnerProjectIdIdx: index('idx_delete_capacity_pool_refreshes_owner_project_id').on(
+      table.ownerProjectId
+    ),
     dueIdx: index('idx_capacity_pool_refreshes_due').on(table.state, table.nextAttemptAt),
   })
 );
@@ -4424,6 +4458,9 @@ export const capacityPoolFallbacks = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteFallbackPoolIdIdx: index('idx_delete_capacity_pool_fallbacks_fallback_pool_id').on(
+      table.fallbackPoolId
+    ),
     pk: primaryKey({ columns: [table.poolId, table.fallbackPoolId] }),
     orderUnique: uniqueIndex('idx_capacity_pool_fallbacks_order').on(
       table.poolId,
@@ -4928,6 +4965,9 @@ export const projectDataSessionLocations = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
   },
   (table) => ({
+    deleteMigrationIdIdx: index('idx_delete_project_data_session_locations_migration_id').on(
+      table.migrationId
+    ),
     pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
     ownerIdx: index('idx_project_data_session_locations_owner').on(
       table.ownerKind,
@@ -5354,6 +5394,12 @@ export const platformFeedbackTriages = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    deleteDispatchedTriggerIdIdx: index(
+      'idx_delete_platform_feedback_triages_dispatched_trigger_id'
+    ).on(table.dispatchedTriggerId),
+    deleteDispatchedExecutionIdIdx: index(
+      'idx_delete_platform_feedback_triages_dispatched_execution_id'
+    ).on(table.dispatchedExecutionId),
     dispatchedTaskIdx: index('idx_platform_feedback_triages_dispatched_task').on(
       table.dispatchedTaskId
     ),
@@ -5770,6 +5816,9 @@ export const deploymentReleaseEvents = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_deployment_release_events_project_id').on(
+      table.projectId
+    ),
     releaseSeqIdx: index('idx_deployment_release_events_release_seq').on(
       table.releaseId,
       table.seq
@@ -5917,6 +5966,9 @@ export const deploymentCustomDomainEvents = sqliteTable(
       .default(sql`(datetime('now'))`),
   },
   (table) => ({
+    deleteProjectIdIdx: index('idx_delete_deployment_custom_domain_events_project_id').on(
+      table.projectId
+    ),
     environmentCreatedAtIdx: index('idx_deployment_custom_domain_events_environment_created_at').on(
       table.environmentId,
       table.createdAt
