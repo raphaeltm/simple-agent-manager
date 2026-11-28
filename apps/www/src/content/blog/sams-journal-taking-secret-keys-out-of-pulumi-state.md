@@ -79,7 +79,7 @@ flowchart TD
 
 Three choices in there are worth pointing out.
 
-**It checks before it removes.** A key resource leaves the state only when the Worker already holds the secrets made from it. If state might be the only copy of a key, the step stops and changes nothing.
+**It checks before it removes.** A key resource leaves the state only when the Worker already holds a secret under each name that resource used to fill. The check compares names, not values, because names are all Cloudflare will ever show. If a name is missing, state might be the only copy of that key, so the step stops and changes nothing.
 
 **It only touches the state file.** `pulumi state delete` removes a record from Pulumi's bookkeeping; it does not call Cloudflare. The Worker keeps the exact values it was already running with. Nothing is regenerated, so sign-ins and stored credentials carry on as before.
 
