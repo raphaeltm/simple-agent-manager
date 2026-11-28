@@ -149,6 +149,11 @@ if (phase === 'send') {
               'X-Hub-Signature-256': signature,
               'X-GitHub-Event': intent.eventType,
               'X-GitHub-Delivery': intent.deliveryId,
+              // Matched by the deploy-check Cloudflare skip rule; read straight from the step's env
+              // and never printed. `redirect: 'error'` keeps it from following a redirect.
+              ...(process.env.DEPLOY_CHECK_HEADER_VALUE
+                ? { 'x-sam-deploy-check': process.env.DEPLOY_CHECK_HEADER_VALUE }
+                : {}),
             },
             body: intent.payload,
             signal: AbortSignal.timeout(requestTimeoutMs),

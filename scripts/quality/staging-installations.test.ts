@@ -399,8 +399,52 @@ describe('deploy-staging.yml smoke-token probe', () => {
 
   it('skips only on a refusal and never prints the token', () => {
     expect(probe).toContain('if [ "$status" = "401" ]; then');
-    expect(probe).toContain('--data-binary @-');
+    // Rule 83: the consumer reads each secret straight from its own environment and prints only
+    // the HTTP status; neither value is formatted, piped or passed as an argument by the shell.
+    expect(probe).toContain('process.env.SMOKE_TEST_TOKEN');
+    expect(probe).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
+    expect(probe).toContain('process.stdout.write(String(res.status))');
+    // A redirect would carry the header and the token body to another origin.
+    expect(probe).toContain('redirect: "error"');
     expect(probe).not.toMatch(/echo[^\n]*SMOKE_TEST_TOKEN/);
+    expect(probe).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
+    expect(probe).not.toMatch(/\$\{?SMOKE_TEST_TOKEN/);
+  });
+});
+
+describe('deploy-staging.yml deploy-check secret scope', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
+    'utf8'
+  );
+  const job = workflow.match(/\n {2}smoke-tests:\n[\s\S]*?(?=\n {2}[a-z][\w-]*:\n)/)?.[0] ?? '';
+  const jobEnv = job.match(/\n {4}env:\n[\s\S]*?(?=\n {4}steps:)/)?.[0] ?? '';
+
+  it('exposes the bypass secret only to the steps that send requests', () => {
+    expect(job).not.toBe('');
+    expect(jobEnv).not.toBe('');
+    expect(jobEnv).not.toContain('DEPLOY_CHECK_HEADER_VALUE');
+    const scopedSteps = job.match(/DEPLOY_CHECK_HEADER_VALUE: \$\{\{ secrets\./g) ?? [];
+    // Token probe, smoke tests, performance audit, signed GitHub trigger sender.
+    expect(scopedSteps).toHaveLength(4);
+  });
+});
+
+describe('deploy-reusable.yml health check', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
+    'utf8'
+  );
+  const step =
+    workflow.match(/ {6}- name: Health Check\n[\s\S]*?(?=\n {6}- name:|\n {6}#)/)?.[0] ?? '';
+
+  it('sends the deploy-check header without the shell touching the secret', () => {
+    expect(step).not.toBe('');
+    expect(step).toContain('DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}');
+    expect(step).toContain('process.env.DEPLOY_CHECK_HEADER_VALUE');
+    expect(step).toContain('redirect: "error"');
+    expect(step).not.toMatch(/\$\{?DEPLOY_CHECK_HEADER_VALUE/);
+    expect(step).not.toMatch(/echo[^\n]*DEPLOY_CHECK_HEADER_VALUE/);
   });
 });
 

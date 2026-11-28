@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { loginWithToken } from './helpers/auth';
 
 const APP_URL = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';

@@ -257,9 +257,21 @@ jobs:
         # runs there: on the primary a refused token must fail the smoke tests, not skip them.
         if: ${{ needs.lease.outputs.installation != '' && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
         run: |
-          status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
-            curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
-              --data-binary @- "$SMOKE_TEST_API_URL/api/auth/token-login")" || status="request failed"
+          # Node reads both secrets directly from its environment and prints only the HTTP status
+          # (rule 83): the token goes in the body, the optional deploy-check value in its header.
+          status="$(node -e '
+            const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
+            fetch(`${process.env.SMOKE_TEST_API_URL}/api/auth/token-login`, {
+              method: "POST",
+              headers: { "content-type": "application/json", ...(value ? { "x-sam-deploy-check": value } : {}) },
+              body: JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }),
+              // Never follow a redirect: it would carry the header and token to another origin.
+              redirect: "error",
+              signal: AbortSignal.timeout(30000),
+            })
+              .then((res) => process.stdout.write(String(res.status)))
+              .catch(() => process.exit(1));
+          ')" || status="request failed"
           # Only a refusal skips: any other failure (5xx, network) still runs the tests, which then
           # report the broken installation.
           if [ "$status" = "401" ]; then
@@ -270,14 +282,21 @@ jobs:
           fi
         env:
           INSTALLATION: ${{ needs.lease.outputs.installation }}
+          # Optional: header for the zone's "SAM deploy checks" Cloudflare skip rule. Step-scoped so
+          # only the steps that send requests to the deployment can read it.
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Run smoke tests
         if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts
+        env:
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Run current-deployment performance audit only
         if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts admin-runtime-performance.spec.ts
+        env:
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       - name: Upload bounded performance audit
         if: ${{ always() && inputs.performance_audit && steps.smoke_token.outputs.skip != 'true' }}
@@ -296,6 +315,7 @@ jobs:
         if: ${{ inputs.github_trigger_audit && inputs.github_trigger_audit_send_only }}
         env:
           GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
           GH_APP_ID: ${{ secrets.GH_APP_ID }}
           GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
           GITHUB_TRIGGER_AUDIT_FIXTURE: ${{ inputs.github_trigger_audit_fixture }}

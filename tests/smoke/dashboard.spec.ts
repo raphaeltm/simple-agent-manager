@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { loginWithToken } from './helpers/auth';
 
 test.describe('Dashboard', () => {

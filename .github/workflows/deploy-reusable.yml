@@ -2125,8 +2125,29 @@ jobs:
         run: |
           echo "Waiting for API to be ready at $API_URL..."
 
+          # When the zone's "SAM deploy checks" Cloudflare skip rule is configured, send its header so
+          # stricter zone protections do not block this runner. Node reads the secret directly from
+          # its own environment and prints only the /health body: the value is never formatted,
+          # passed as an argument or printed (rule 83).
+          health_body() {
+            node -e '
+              const value = process.env.DEPLOY_CHECK_HEADER_VALUE;
+              fetch(`${process.env.API_URL}/health`, {
+                headers: value ? { "x-sam-deploy-check": value } : {},
+                // Never follow a redirect: it would carry the header to another origin.
+                redirect: "error",
+                signal: AbortSignal.timeout(15000),
+              })
+                .then(async (res) => {
+                  if (!res.ok) process.exit(1);
+                  process.stdout.write(await res.text());
+                })
+                .catch(() => process.exit(1));
+            '
+          }
+
           for i in {1..30}; do
-            RESPONSE=$(curl -sf "$API_URL/health" 2>/dev/null) || {
+            RESPONSE=$(health_body 2>/dev/null) || {
               echo "Waiting for API... ($i/30)"
               sleep 10
               continue
@@ -2151,6 +2172,7 @@ jobs:
           exit 1
         env:
           API_URL: ${{ steps.deploy_resources.outputs.api_url }}
+          DEPLOY_CHECK_HEADER_VALUE: ${{ secrets.DEPLOY_CHECK_HEADER_VALUE }}
 
       # Secondary installations only (never production; the script re-checks the allowlist):
       # seed the two agent test users. No secret value is read, decrypted or copied here; an admin

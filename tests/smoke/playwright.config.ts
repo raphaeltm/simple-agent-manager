@@ -25,6 +25,10 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     browserName: 'chromium',
     viewport: { width: 1280, height: 800 },
+    // The deploy-check header reaches browser traffic only through request interception
+    // (tests/smoke/fixtures.ts), and Playwright cannot intercept requests the app's service worker
+    // handles. With the header configured, block service workers so every request is intercepted.
+    serviceWorkers: process.env.DEPLOY_CHECK_HEADER_VALUE ? 'block' : 'allow',
     // Cookies will be set by the auth helper
   },
   // No webServer — tests run against a live deployment
