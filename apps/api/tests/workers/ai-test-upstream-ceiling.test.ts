@@ -13,29 +13,22 @@
  * upstream path, which needs a platform key this installation does not have (503), where the
  * fake would have answered 200.
  */
-import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
-import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
+import { FAKE_UPSTREAM_TEXT } from '@simple-agent-manager/ai-proxy';
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import worker from '../../src/index';
-import { updateAdminSettings } from '../../src/services/admin-settings-mutations';
-import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
-import { FAKE_UPSTREAM_TEXT } from '../../src/services/ai-test-upstream-responses';
-import { signCallbackToken } from '../../src/services/jwt';
-import { seedNode, seedSignedInUser, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  bindings,
+  CLAUDE_MODEL,
+  nativeMessages,
+  OPENAI_MODEL,
+  testUpstreamHarness,
+} from './helpers/ai-test-upstream';
+import { seedSignedInUser } from './helpers/seed-d1';
 
-const bindings = env as unknown as Env;
 const PREFIX = `aitestup-${Date.now()}`;
-const ADMIN_ID = `${PREFIX}-admin`;
-
-/** A catalog Anthropic model whose output price keeps four $0.40 calls under the daily budget. */
-const CLAUDE_MODEL = PLATFORM_AI_MODELS.find(
-  (model) => model.provider === 'anthropic' && model.costPer1kOutputTokens >= 0.015
-)!;
-const OPENAI_MODEL = PLATFORM_AI_MODELS.find(
-  (model) => model.provider === 'openai' && model.costPer1kOutputTokens >= 0.008
-)!;
 
 /** The self-host box shape: no AI Gateway, a non-production label, the deploy flag set. */
 const BOX_ENV: Partial<Env> = {
@@ -43,6 +36,7 @@ const BOX_ENV: Partial<Env> = {
   ENVIRONMENT: 'selfhost',
   AI_TEST_UPSTREAM_ENABLED: 'true',
 };
+const { setSettings, seedCaller, call } = testUpstreamHarness(PREFIX, BOX_ENV);
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -65,60 +59,6 @@ afterEach(() => {
   fetchSpy.mockRestore();
 });
 
-async function setSettings(
-  changes: Parameters<typeof updateAdminSettings>[1]['changes'],
-  overrides: Partial<Env> = BOX_ENV
-): Promise<void> {
-  await seedUser(ADMIN_ID);
-  await updateAdminSettings({ ...bindings, ...overrides }, { actorUserId: ADMIN_ID, changes });
-  invalidateAdminSettings(bindings);
-}
-
-async function seedCaller(suffix: string): Promise<{ userId: string; token: string }> {
-  const userId = `${PREFIX}-${suffix}`;
-  const workspaceId = `${PREFIX}-ws-${suffix}`;
-  await seedUser(userId);
-  const nodeId = `${PREFIX}-node-${suffix}`;
-  await seedNode(nodeId, userId);
-  await seedWorkspace(workspaceId, nodeId, userId, { status: 'running' });
-  return {
-    userId,
-    token: await signCallbackToken(workspaceId, bindings, { callbackGeneration: null }),
-  };
-}
-
-async function call(
-  path: string,
-  token: string,
-  body: Record<string, unknown>,
-  overrides: Partial<Env> = BOX_ENV
-): Promise<Response> {
-  const ctx = createExecutionContext();
-  const response = await worker.fetch(
-    new Request(`https://api.${bindings.BASE_DOMAIN}${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    }),
-    { ...bindings, ...overrides },
-    ctx
-  );
-  // Read the body before draining waitUntil: accounting runs on the streamed body.
-  const text = await response.text();
-  await waitOnExecutionContext(ctx);
-  return new Response(text, { status: response.status, headers: response.headers });
-}
-
-const nativeMessages = (stream: boolean) => ({
-  model: CLAUDE_MODEL.id,
-  max_tokens: 64,
-  stream,
-  messages: [{ role: 'user', content: 'hello' }],
-});
 const chatCompletion = (model: string, stream: boolean) => ({
   model,
   stream,

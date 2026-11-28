@@ -180,6 +180,8 @@ function withReliabilityStorageObjects<T extends Record<string, unknown>>(existi
   return {
     ...existing,
     MCP_RATE_COUNTER: { className: 'McpRateCounter', useSQLite: true },
+    // Per-user AI spend counter. Gateway installs price admission from it (checkGatewayCostAdmission).
+    AI_TOKEN_BUDGET_COUNTER: { className: 'AiTokenBudgetCounter', useSQLite: true },
     WORKSPACE_BOOT_LOG: { className: 'WorkspaceBootLog', useSQLite: true },
   };
 }

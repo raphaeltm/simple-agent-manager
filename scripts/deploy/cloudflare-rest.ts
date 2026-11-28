@@ -4,7 +4,7 @@
  * detection for permission probes, and a write counter so idempotent re-runs can be asserted.
  */
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface CloudflareEnvelope {
   success?: boolean;

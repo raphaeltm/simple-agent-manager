@@ -2070,6 +2070,20 @@ jobs:
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
+      # Staging only: the test-only fake AI upstream on workers.dev plus its AI Gateway custom
+      # provider (scripts/deploy/fake-ai-upstream.ts; the script refuses any other stack). It fails
+      # the deploy like every other step: a half-configured fake must not pass silently.
+      - name: Deploy staging fake AI upstream
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && inputs.environment == 'staging' }}
+        run: pnpm tsx scripts/deploy/fake-ai-upstream.ts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CREDENTIAL_ENVIRONMENT: ${{ inputs.environment }}
+          DEPLOY_STACK: ${{ steps.deploy_resources.outputs.stack }}
+          RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
+          AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}
+
       # Wrangler starts gradual rollouts before returning; both deployment paths
       # must wait for the exact targets to finish before reporting success.
       - name: Wait for container rollout completion

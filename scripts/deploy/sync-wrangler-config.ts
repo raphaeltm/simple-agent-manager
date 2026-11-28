@@ -33,6 +33,7 @@ import {
   listEnvironmentVarOverrides,
   reportEnvironmentVarOverrides,
 } from './environment-var-overrides.js';
+import { fakeAiUpstreamWorkerVars } from './fake-ai-upstream-plan.js';
 import { generateSetupToken } from './setup-token.js';
 import type {
   AIBinding,
@@ -590,6 +591,9 @@ export function getApiWorkerVars(
     WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
     // Deployment environment name (staging | production); used for diagnostics and node labels
     ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
+    // Test-only fake AI upstream (apps/api/src/services/ai-test-upstream.ts): staging stacks only,
+    // the same plan that decides whether the deploy creates its Worker (fake-ai-upstream-plan.ts).
+    ...fakeAiUpstreamWorkerVars(stack, DEPLOYMENT_CONFIG.prefix),
     // Artifacts is disabled by default and enabled only with the generated binding.
     ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
     // Plaintext by design: first-run admins read this once from the CF dashboard. Inside

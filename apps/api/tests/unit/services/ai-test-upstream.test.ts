@@ -1,13 +1,13 @@
 import { findPricedModel, priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
-import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
-
-import { isAiTestUpstreamDeployable } from '../../../src/services/ai-test-upstream';
 import {
   buildFakeUpstreamResponse,
   FAKE_UPSTREAM_TEXT,
   fakeUsageForCost,
-} from '../../../src/services/ai-test-upstream-responses';
+} from '@simple-agent-manager/ai-proxy';
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
+
+import { isAiTestUpstreamDeployable } from '../../../src/services/ai-test-upstream';
 
 describe('isAiTestUpstreamDeployable (deploy-time locks)', () => {
   it.each([
