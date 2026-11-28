@@ -5,6 +5,12 @@ export interface WorkersDevPlan {
   action: 'preserve' | 'create';
   subdomain: string;
 }
+/** The names of a deployment this installation takes over (adoption-plan.ts). */
+export interface AdoptionTarget {
+  prefix: string;
+  environment: string;
+  stateBucket: string;
+}
 export interface InstallationConfig {
   accountId: string;
   zoneId: string;
@@ -13,6 +19,7 @@ export interface InstallationConfig {
   ownerEmail: string;
   sourceCommit: string;
   workersDev?: WorkersDevPlan;
+  adoption?: AdoptionTarget;
 }
 export interface InstallationPlan extends InstallationConfig {
   workersDev: WorkersDevPlan;
@@ -34,6 +41,7 @@ export function validateInstallationConfig(value: unknown): InstallationConfig {
     throw new Error('Choose an installation domain inside the selected zone');
   if (!isValidOwnerEmail(c.ownerEmail)) throw new Error('Owner email required');
   if (!/^[a-f0-9]{40}$/.test(c.sourceCommit)) throw new Error('Approve an immutable source commit');
+  const adoption = c.adoption === undefined ? undefined : validateAdoptionTarget(c.adoption);
   return {
     accountId: c.accountId,
     zoneId: c.zoneId,
@@ -41,13 +49,56 @@ export function validateInstallationConfig(value: unknown): InstallationConfig {
     baseDomain: c.baseDomain,
     ownerEmail: c.ownerEmail.trim().toLowerCase(),
     sourceCommit: c.sourceCommit,
+    ...(adoption ? { adoption } : {}),
   };
 }
-export async function previewInstallation(
-  token: string,
-  input: unknown
-): Promise<InstallationPlan> {
-  const c = validateInstallationConfig(input);
+/** Name shapes a fork deployment may have (workflow-resource-names.mjs). */
+export const DEPLOYMENT_PREFIX = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+export const DEPLOYMENT_STACK = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
+/**
+ * An R2 bucket name, as `installationCredentialBuckets` accepts it (credentials.ts). R2 allows
+ * only lowercase letters, digits and hyphens, so unlike an S3 name it never contains a dot.
+ */
+export const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
+export function validateAdoptionTarget(value: unknown): AdoptionTarget {
+  const t = value as AdoptionTarget | null;
+  if (
+    !t ||
+    typeof t !== 'object' ||
+    typeof t.prefix !== 'string' ||
+    !DEPLOYMENT_PREFIX.test(t.prefix) ||
+    typeof t.environment !== 'string' ||
+    !DEPLOYMENT_STACK.test(t.environment) ||
+    typeof t.stateBucket !== 'string' ||
+    !BUCKET_NAME.test(t.stateBucket)
+  )
+    throw new Error('Invalid takeover target');
+  return { prefix: t.prefix, environment: t.environment, stateBucket: t.stateBucket };
+}
+/** Pulumi stack name for a deployment environment (workflow-resource-names.mjs). */
+export function stackForEnvironment(environment: string): string {
+  return environment === 'production' ? 'prod' : environment;
+}
+/** The account's workers.dev address: preserved when set, otherwise the one to create. */
+export async function workersDevPlan(token: string, accountId: string): Promise<WorkersDevPlan> {
+  let current: string | undefined;
+  try {
+    const result = await cloudflare<{ subdomain: string }>(
+      token,
+      `/accounts/${accountId}/workers/subdomain`
+    );
+    if (typeof result.subdomain !== 'string')
+      throw new Error('Invalid account workers.dev response');
+    current = result.subdomain || undefined;
+  } catch (error) {
+    if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
+  }
+  if (current && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(current))
+    throw new Error('Invalid account workers.dev address');
+  return { action: current ? 'preserve' : 'create', subdomain: current || `sam-${accountId}` };
+}
+/** Confirms the selected zone is active and belongs to the authorized account. */
+export async function assertActiveZone(token: string, c: InstallationConfig): Promise<void> {
   const zone = await cloudflare<{
     id: string;
     name: string;
@@ -61,24 +112,15 @@ export async function previewInstallation(
     zone.status !== 'active'
   )
     throw new Error('The selected active zone must belong to the authorized account');
-  let current: string | undefined;
-  try {
-    const result = await cloudflare<{ subdomain: string }>(
-      token,
-      `/accounts/${c.accountId}/workers/subdomain`
-    );
-    if (typeof result.subdomain !== 'string')
-      throw new Error('Invalid account workers.dev response');
-    current = result.subdomain || undefined;
-  } catch (error) {
-    if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
-  }
-  if (current && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(current))
-    throw new Error('Invalid account workers.dev address');
-  const workersDev: WorkersDevPlan = {
-    action: current ? 'preserve' : 'create',
-    subdomain: current || `sam-${c.accountId}`,
-  };
+}
+export async function previewInstallation(
+  token: string,
+  input: unknown
+): Promise<InstallationPlan> {
+  const c = validateInstallationConfig(input);
+  if (c.adoption) throw new Error('Review a takeover with previewAdoption');
+  await assertActiveZone(token, c);
+  const workersDev = await workersDevPlan(token, c.accountId);
   const hostnames = ['api', 'app', 'preview', '*'].map((name) => `${name}.${c.baseDomain}`);
   const conflicts: InstallationPlan['conflicts'] = [];
   // Query each exact hostname instead of silently truncating a large DNS zone.

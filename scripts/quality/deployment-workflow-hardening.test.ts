@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { INSTALLATION_KEY_NAMES } from '../deploy/installation-keys';
 import {
   allWorkflowRunBlocks,
   namedStep,
@@ -58,25 +59,26 @@ function installFakePnpm(binDir: string): void {
   const fakePnpm = `#!/bin/sh
 set -eu
 
-if [ "$#" -ge 4 ] && [ "$1" = "exec" ] && [ "$2" = "tsx" ]; then
-  case "$3 $4" in
-    "scripts/deploy/deploy-signing-keys.ts derive-public")
-      printf '%s\\n' "$EXPECTED_DEPLOY_SIGNING_PUBLIC_KEY"
-      exit 0
-      ;;
-    "scripts/deploy/vapid-keys.ts derive-public-from-raw")
-      printf '%s\\n' "$EXPECTED_VAPID_PUBLIC_KEY"
-      exit 0
-      ;;
-    "scripts/deploy/vapid-keys.ts derive-private-from-pem")
-      printf '%s\\n' "derived-vapid-private-from-pem"
-      exit 0
-      ;;
-    "scripts/deploy/vapid-keys.ts derive-public-from-pem")
-      printf '%s\\n' "$EXPECTED_VAPID_PUBLIC_KEY"
-      exit 0
-      ;;
-  esac
+# \`wrangler secret list --format json\`: names and types only, like Cloudflare.
+case " $* " in
+  *" secret list "*)
+    if [ -n "\${FAKE_WRANGLER_LIST_FAIL:-}" ]; then
+      echo "X [ERROR] simulated wrangler failure: listing secrets" >&2
+      exit 1
+    fi
+    printf '[' ; first=1
+    for name in $(printf '%s' "$FAKE_WORKER_SECRET_NAMES" | tr ',' ' '); do
+      if [ "$first" = 1 ]; then first=0; else printf ','; fi
+      printf '{"name":"%s","type":"secret_text"}' "$name"
+    done
+    printf ']\n'
+    exit 0
+    ;;
+esac
+# The real names-only check, so the test exercises the script deploys run.
+if [ "$#" -ge 4 ] && [ "$1" = "exec" ] && [ "$2" = "tsx" ] && [ "$3" = "scripts/deploy/installation-keys.ts" ]; then
+  shift 2
+  exec "$REAL_TSX" "$@"
 fi
 
 previous_arg=''
@@ -110,40 +112,14 @@ exit 64
   chmodSync(fakePath, 0o755);
 }
 
-// Pulumi stand-in: `stack select` succeeds, `stack output <name>` prints
-// pulumi-value-<name>. FAKE_PULUMI_FAIL_OUTPUT makes one output fail after
-// printing a secret-looking value on stdout, which must never be shown.
-// FAKE_PULUMI_MISSING_OUTPUT reports one output as absent, as Pulumi does.
-function installFakePulumi(binDir: string): void {
-  const fakePulumi = `#!/bin/sh
-set -eu
-
-if [ "$1" = "stack" ] && [ "$2" = "select" ]; then
-  exit 0
-fi
-if [ "$1" = "stack" ] && [ "$2" = "output" ]; then
-  if [ "$3" = "\${FAKE_PULUMI_FAIL_OUTPUT:-}" ]; then
-    echo "pulumi-stdout-secret-value"
-    echo "error: simulated pulumi backend failure: AccessDenied reading state" >&2
-    exit 255
-  fi
-  if [ "$3" = "\${FAKE_PULUMI_MULTILINE_OUTPUT:-}" ]; then
-    printf 'pulumi-value-%s-line-1\\npulumi-value-%s-line-2\\n' "$3" "$3"
-    exit 0
-  fi
-  if [ "$3" = "\${FAKE_PULUMI_MISSING_OUTPUT:-}" ]; then
-    echo "error: current stack does not have output property '$3'" >&2
-    exit 255
-  fi
-  printf 'pulumi-value-%s\\n' "$3"
-  exit 0
-fi
-
-echo "unexpected pulumi invocation: $*" >&2
-exit 64
-`;
+// Deploys never touch Pulumi for keys: any pulumi invocation is recorded and fails.
+function installPulumiTripwire(binDir: string, captureDir: string): void {
   const fakePath = join(binDir, 'pulumi');
-  writeFileSync(fakePath, fakePulumi, 'utf8');
+  writeFileSync(
+    fakePath,
+    `#!/bin/sh\necho "$*" >> "${join(captureDir, 'pulumi-invocations.txt')}"\nexit 64\n`,
+    'utf8'
+  );
   chmodSync(fakePath, 0o755);
 }
 
@@ -152,27 +128,29 @@ function configureSecretsEnv(
   captureDir: string,
   overrides: Record<string, string | undefined> = {}
 ): NodeJS.ProcessEnv {
-  const expectedDeployPublic = 'derived-deploy-signing-public';
-  const expectedVapidPublic = 'derived-vapid-public';
   return {
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
     CAPTURED_BULK_PAYLOAD: join(captureDir, 'worker-secret-bulk-payload.json'),
     CAPTURED_BULK_SOURCE_PATH: join(captureDir, 'worker-secret-bulk-source-path.txt'),
     CAPTURED_BULK_INVOCATIONS: join(captureDir, 'worker-secret-bulk-invocations.txt'),
-    EXPECTED_DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
-    EXPECTED_VAPID_PUBLIC_KEY: expectedVapidPublic,
+    REAL_TSX: join(repoRoot, 'node_modules/.bin/tsx'),
+    FAKE_WORKER_SECRET_NAMES: [...INSTALLATION_KEY_NAMES, 'GITHUB_CLIENT_SECRET'].join(','),
+    // Key values as an old workflow passed them. Deploys must ignore every one.
     SECRET_ENCRYPTION_KEY: 'encryption-secret',
     SECRET_JWT_PRIVATE_KEY: 'jwt-private-secret',
     SECRET_JWT_PUBLIC_KEY: 'jwt-public-secret',
     PULUMI_PREVIEW_SIGNING_KEY: 'preview-signing-secret',
     VAPID_PRIVATE_KEY: 'vapid-private-secret',
-    VAPID_PUBLIC_KEY: expectedVapidPublic,
+    VAPID_PUBLIC_KEY: 'vapid-public-secret',
+    BETTER_AUTH_SECRET: 'better-auth-secret',
+    CREDENTIAL_ENCRYPTION_KEY: 'credential-encryption-secret',
+    PULUMI_STACK: 'self-host-stack',
     VAPID_SUBJECT: 'https://app.example.test',
     CF_API_TOKEN: 'cf-api-token-secret',
     CF_ZONE_ID: 'cf-zone-id-secret',
     CF_ACCOUNT_ID: 'cf-account-id-secret',
     DEPLOY_SIGNING_PRIVATE_KEY: 'deploy-signing-private-secret',
-    DEPLOY_SIGNING_PUBLIC_KEY: expectedDeployPublic,
+    DEPLOY_SIGNING_PUBLIC_KEY: 'deploy-signing-public-secret',
     GH_CLIENT_ID: 'github-client-id',
     GH_CLIENT_SECRET: 'github-client-secret-line-1\ngithub-client-secret-line-2',
     GH_APP_ID: 'github-app-id',
@@ -197,7 +175,7 @@ function runConfigureSecrets(overrides: Record<string, string | undefined> = {})
     mkdirSync(binDir);
     mkdirSync(captureDir);
     installFakePnpm(binDir);
-    installFakePulumi(binDir);
+    installPulumiTripwire(binDir, captureDir);
 
     const result = spawnSync('bash', [configureSecretsScript, 'staging'], {
       cwd: repoRoot,
@@ -213,6 +191,7 @@ function runConfigureSecrets(overrides: Record<string, string | undefined> = {})
       bulkPayload: readOptionalFile(capturedPayloadPath),
       bulkSourcePath: readOptionalFile(capturedSourcePath)?.trim() ?? null,
       bulkInvocations: Number.isFinite(bulkInvocations) ? bulkInvocations : 0,
+      pulumiInvocations: readOptionalFile(join(captureDir, 'pulumi-invocations.txt')),
       cleanup: () => rmSync(tmpRoot, { force: true, recursive: true }),
     };
   } catch (error) {
@@ -661,6 +640,36 @@ describe('deployment workflow hardening', () => {
     expect(contents).not.toContain('AI_GATEWAY_ID:-sam');
   });
 
+  it('no workflow passes an installation key to any step', () => {
+    const keySecret =
+      /secrets\.(ENCRYPTION_KEY|JWT_PRIVATE_KEY|JWT_PUBLIC_KEY|DEPLOY_SIGNING_PRIVATE_KEY|DEPLOY_SIGNING_PUBLIC_KEY|VAPID_PRIVATE_KEY|VAPID_PUBLIC_KEY|PREVIEW_SIGNING_KEY|BETTER_AUTH_SECRET|CREDENTIAL_ENCRYPTION_KEY)\b/;
+    const files = workflowFileNames();
+    expect(files.length).toBeGreaterThan(10);
+    const offenders = files.filter((file) => keySecret.test(repoFile(`.github/workflows/${file}`)));
+    expect(offenders).toEqual([]);
+  });
+
+  it('retires installation-key resources after the refresh and immediately before Pulumi Up', () => {
+    const workflow = parsedWorkflow('deploy-reusable.yml');
+    const steps = (workflow.jobs?.deploy?.steps ?? []).map((step) => step.name ?? '');
+    const refresh = steps.indexOf('Pulumi Refresh');
+    const retire = steps.indexOf('Retire Installation-Key Resources From Pulumi State');
+    const up = steps.indexOf('Pulumi Up');
+    expect(refresh).toBeGreaterThan(-1);
+    expect(retire).toBe(up - 1);
+    expect(refresh).toBeLessThan(retire);
+    const retireStep = namedStep(workflow, 'Retire Installation-Key Resources From Pulumi State');
+    expect(retireStep.run).toContain('pnpm exec tsx scripts/deploy/retire-key-resources.ts retire');
+    expect(retireStep.run).toContain('PULUMI_CLI_PATH="$(realpath "$(command -v pulumi)")"');
+    expect(retireStep.env).toMatchObject({
+      API_WORKER_NAME: '${{ steps.deploy_resources.outputs.api_worker }}',
+    });
+    // The dry-run preview excludes key resources still in state and never diffs.
+    const preview = namedStep(workflow, 'Pulumi Preview');
+    expect(preview.run).toContain('retire-key-resources.ts exclude-args');
+    expect(preview.run).not.toContain('--diff');
+  });
+
   it('worker secret configuration requires an explicit environment', () => {
     const contents = repoFile('scripts/deploy/configure-secrets.sh');
     const deployWorkflow = parsedWorkflow('deploy-reusable.yml');
@@ -684,249 +693,233 @@ describe('deployment workflow hardening', () => {
     });
   });
 
-  it('worker secret configuration applies one redacted bulk payload with stale deletes', () => {
-    const result = runConfigureSecrets();
-    try {
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toContain('Applying ');
-      expect(result.stdout).toContain('wrangler secret bulk');
-      expect(result.stdout).toContain('Worker secrets configured in bulk');
-      expect(result.bulkInvocations).toBe(1);
-
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      expect(combinedOutput).not.toContain('github-client-secret-line-1');
-      expect(combinedOutput).not.toContain('github-client-secret-line-2');
-      expect(combinedOutput).not.toContain('encryption-secret');
-      expect(combinedOutput).not.toContain('deploy-signing-private-secret');
-      expect(result.bulkSourcePath).toBeTruthy();
-
-      const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
-      expect(payload.ENCRYPTION_KEY).toBe('encryption-secret');
-      expect(payload.JWT_PRIVATE_KEY).toBe('jwt-private-secret');
-      expect(payload.JWT_PUBLIC_KEY).toBe('jwt-public-secret');
-      expect(payload.GITHUB_CLIENT_ID).toBe('github-client-id');
-      expect(payload.GITHUB_CLIENT_SECRET).toBe(
-        'github-client-secret-line-1\ngithub-client-secret-line-2'
-      );
-      expect(payload.GITHUB_APP_PRIVATE_KEY).toBe('github-app-private-key');
-      expect(payload.AI_PROXY_DEFAULT_MODEL).toBeNull();
-      expect(payload.AI_PROXY_ENABLED).toBeNull();
-      // Retired anonymous-trial secrets are deleted from upgraded deployments, never set.
-      expect(payload.TRIAL_CLAIM_TOKEN_SECRET).toBeNull();
-      expect(payload.ANTHROPIC_API_KEY_TRIAL).toBeNull();
-      expect(Object.keys(payload).length).toBeGreaterThan(10);
-      expect(Object.keys(payload).length).toBeLessThanOrEqual(100);
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  it('worker secret configuration fails before bulk apply when the operation budget is exceeded', () => {
-    const result = runConfigureSecrets({
-      WORKER_SECRET_BULK_MAX_OPS: '1',
-      SECRET_ENCRYPTION_KEY: 'budget-secret-line-1\nbudget-secret-line-2',
-    });
-    try {
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('exceeding WORKER_SECRET_BULK_MAX_OPS=1');
-      expect(result.bulkInvocations).toBe(0);
-      expect(result.bulkPayload).toBeNull();
-
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      expect(combinedOutput).not.toContain('budget-secret-line-1');
-      expect(combinedOutput).not.toContain('budget-secret-line-2');
-      expect(combinedOutput).not.toContain('jwt-private-secret');
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  it('worker secret configuration fails before bulk apply when required secrets are missing', () => {
-    const result = runConfigureSecrets({
-      SECRET_ENCRYPTION_KEY: 'partial-secret',
-      SECRET_JWT_PRIVATE_KEY: '',
-    });
-    try {
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('Required secret JWT_PRIVATE_KEY is not set');
-      expect(result.stderr).toContain('Some required secrets failed to configure');
-      expect(result.bulkInvocations).toBe(0);
-      expect(result.bulkPayload).toBeNull();
-
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      expect(combinedOutput).not.toContain('partial-secret');
-      expect(combinedOutput).not.toContain('github-client-secret-line-1');
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  // A self-host install failed in publish-application with nothing recorded:
-  // Pulumi reads and the Wrangler bulk apply both discarded their diagnostics.
-  const configureSecretValues = [
+  const KEY_VALUES = [
     'encryption-secret',
     'jwt-private-secret',
     'jwt-public-secret',
     'preview-signing-secret',
     'vapid-private-secret',
-    'cf-api-token-secret',
+    'vapid-public-secret',
+    'better-auth-secret',
+    'credential-encryption-secret',
     'deploy-signing-private-secret',
-    'github-client-secret-line-1',
-    'github-client-secret-line-2',
-    'github-app-private-key',
+    'deploy-signing-public-secret',
   ];
-
-  it('worker secret configuration names the Pulumi output and error when a read fails', () => {
-    const result = runConfigureSecrets({
-      PULUMI_STACK: 'self-host-stack',
-      SECRET_ENCRYPTION_KEY: '',
-      FAKE_PULUMI_FAIL_OUTPUT: 'encryptionKey',
-    });
-    try {
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        "could not read Pulumi output encryptionKey: 'pulumi stack output encryptionKey' exited with status 255"
-      );
-      expect(result.stderr).toContain(
-        'pulumi: error: simulated pulumi backend failure: AccessDenied reading state'
-      );
-      expect(result.stderr).toContain('No security keys available');
-      expect(result.stderr).toContain(
-        'Pulumi output reads that came back empty from stack self-host-stack: encryptionKey'
-      );
-      expect(result.bulkInvocations).toBe(0);
-
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      expect(combinedOutput).not.toContain('pulumi-stdout-secret-value');
-      expect(combinedOutput).not.toContain('pulumi-value-');
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  it('worker secret configuration says when a Pulumi output is missing', () => {
-    const result = runConfigureSecrets({
-      PULUMI_STACK: 'self-host-stack',
-      DEPLOY_SIGNING_PRIVATE_KEY: '',
-      DEPLOY_SIGNING_PUBLIC_KEY: '',
-      FAKE_PULUMI_MISSING_OUTPUT: 'deploySigningPrivateKey',
-    });
-    try {
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain(
-        'Pulumi stack self-host-stack has no output named deploySigningPrivateKey'
-      );
-      expect(result.stderr).toContain('No deploy signing key available');
-      expect(result.stderr).toContain(
-        'Pulumi output reads that came back empty from stack self-host-stack: deploySigningPrivateKey'
-      );
-      expect(`${result.stdout}\n${result.stderr}`).not.toContain('pulumi-value-');
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  it('worker secret configuration shows redacted Wrangler output when the bulk apply fails', () => {
-    const result = runConfigureSecrets({
-      FAKE_WRANGLER_BULK_FAIL: '1',
-      // Wrangler does not echo values; the stub does, to prove redaction holds.
-      FAKE_WRANGLER_ECHOED_VALUE:
-        'encryption-secret github-client-secret-line-1\ngithub-client-secret-line-2',
-    });
-    try {
-      expect(result.status).not.toBe(0);
-      expect(result.bulkInvocations).toBe(1);
-      expect(result.stderr).toContain('Worker secret bulk configuration failed');
-      expect(result.stderr).toContain('Wrangler exited with status 1');
-      expect(result.stderr).toContain(
-        'wrangler: X [ERROR] simulated wrangler failure: Authentication error [code: 10000]'
-      );
-      expect(result.stderr).toContain('wrangler: Uploading secrets for staging');
-      expect(result.stderr).toContain('2 line(s) withheld because they contained a secret value');
-
-      const combinedOutput = `${result.stdout}\n${result.stderr}`;
-      for (const value of configureSecretValues) {
-        expect(combinedOutput).not.toContain(value);
-      }
-    } finally {
-      result.cleanup();
-    }
-  });
-
-  it('worker secret configuration stays quiet when Pulumi reads and the bulk apply succeed', () => {
-    const result = runConfigureSecrets({
-      PULUMI_STACK: 'self-host-stack',
-      SECRET_ENCRYPTION_KEY: '',
-    });
-    try {
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toContain('Using security keys from Pulumi state');
-      expect(result.stdout).toContain('Worker secrets configured in bulk');
-      expect(result.stdout).not.toContain('wrangler success chatter');
-      expect(result.stdout).not.toContain('pulumi-value-');
-
-      const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
-      expect(payload.ENCRYPTION_KEY).toBe('pulumi-value-encryptionKey');
-      expect(payload.JWT_PRIVATE_KEY).toBe('pulumi-value-jwtPrivateKey');
-    } finally {
-      result.cleanup();
-    }
-  });
-
   // Each of these runs configure-secrets.sh end to end, which can pass 5 s on a loaded runner.
   const CONFIGURE_SECRETS_TIMEOUT_MS = 30_000;
 
   it(
-    'worker secret configuration masks every Pulumi value in GitHub Actions before using it',
+    'worker secret configuration checks key names, writes no key, and applies one bulk payload',
     () => {
-      const result = runConfigureSecrets({
-        GITHUB_ACTIONS: 'true',
-        PULUMI_STACK: 'self-host-stack',
-        SECRET_ENCRYPTION_KEY: '',
-        DEPLOY_SIGNING_PRIVATE_KEY: '',
-        DEPLOY_SIGNING_PUBLIC_KEY: '',
-        VAPID_PRIVATE_KEY: '',
-        VAPID_PUBLIC_KEY: '',
-        PULUMI_PREVIEW_SIGNING_KEY: '',
-        FAKE_PULUMI_MULTILINE_OUTPUT: 'jwtPrivateKey',
-      });
+      const result = runConfigureSecrets();
       try {
         expect(result.status).toBe(0);
-        const lines = result.stdout.split('\n');
-        const masks = lines.filter((line) => line.startsWith('::add-mask::'));
-        for (const output of [
-          'encryptionKey',
-          'jwtPublicKey',
-          'deploySigningPrivateKey',
-          'previewSigningKey',
-          'vapidPrivateKeyPem',
-        ]) {
-          expect(masks).toContain(`::add-mask::pulumi-value-${output}`);
-        }
-        // A multi-line value: every line, and the single-line JSON-escaped form.
-        expect(masks).toContain('::add-mask::pulumi-value-jwtPrivateKey-line-1');
-        expect(masks).toContain('::add-mask::pulumi-value-jwtPrivateKey-line-2');
-        expect(masks).toContain(
-          '::add-mask::pulumi-value-jwtPrivateKey-line-1\\npulumi-value-jwtPrivateKey-line-2'
-        );
-        // A private key derived from a Pulumi value is masked too.
-        expect(masks).toContain('::add-mask::derived-vapid-private-from-pem');
-        // Nothing else carries a value: only mask commands mention one.
-        for (const line of lines) {
-          if (/pulumi-value-|derived-vapid-private/.test(line)) {
-            expect(line.startsWith('::add-mask::')).toBe(true);
-          }
-        }
         expect(result.stderr).toBe('');
+        expect(result.stdout).toContain('installation keys are present');
+        expect(result.stdout).toContain('Worker secrets configured in bulk');
+        expect(result.bulkInvocations).toBe(1);
+        expect(result.pulumiInvocations).toBeNull();
         const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
-        expect(payload.JWT_PRIVATE_KEY).toBe(
-          'pulumi-value-jwtPrivateKey-line-1\npulumi-value-jwtPrivateKey-line-2'
+        for (const name of [
+          ...INSTALLATION_KEY_NAMES,
+          'BETTER_AUTH_SECRET',
+          'CREDENTIAL_ENCRYPTION_KEY',
+        ])
+          expect(payload).not.toHaveProperty(name);
+        const everything = `${result.stdout}\n${result.stderr}\n${result.bulkPayload}`;
+        for (const value of KEY_VALUES) expect(everything).not.toContain(value);
+        expect(payload.VAPID_SUBJECT).toBe('https://app.example.test');
+        expect(payload.GITHUB_CLIENT_SECRET).toBe(
+          'github-client-secret-line-1\ngithub-client-secret-line-2'
         );
-        expect(payload.VAPID_PRIVATE_KEY).toBe('derived-vapid-private-from-pem');
+        expect(payload.AI_PROXY_ENABLED).toBeNull();
+        expect(payload.TRIAL_CLAIM_TOKEN_SECRET).toBeNull();
+        expect(Object.keys(payload).length).toBeLessThanOrEqual(100);
       } finally {
         result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration fails without creating a key when the Worker is missing one',
+    () => {
+      const result = runConfigureSecrets({
+        FAKE_WORKER_SECRET_NAMES: INSTALLATION_KEY_NAMES.filter(
+          (name) => name !== 'PREVIEW_SIGNING_KEY'
+        ).join(','),
+      });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('missing installation keys: PREVIEW_SIGNING_KEY');
+        expect(result.stderr).toContain('nothing was changed');
+        expect(result.bulkInvocations).toBe(0);
+        expect(result.pulumiInvocations).toBeNull();
+        for (const value of KEY_VALUES)
+          expect(`${result.stdout}\n${result.stderr}`).not.toContain(value);
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration fails closed when the secret names cannot be listed',
+    () => {
+      const result = runConfigureSecrets({ FAKE_WRANGLER_LIST_FAIL: '1' });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('missing installation keys');
+        expect(result.bulkInvocations).toBe(0);
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration fails before bulk apply when the operation budget is exceeded',
+    () => {
+      const result = runConfigureSecrets({ WORKER_SECRET_BULK_MAX_OPS: '1' });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('exceeding WORKER_SECRET_BULK_MAX_OPS=1');
+        expect(result.bulkInvocations).toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).not.toContain('github-client-secret-line-1');
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration fails before bulk apply when required secrets are missing',
+    () => {
+      const result = runConfigureSecrets({ CF_API_TOKEN: '' });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('Required secret CF_API_TOKEN is not set');
+        expect(result.stderr).toContain('Some required secrets failed to configure');
+        expect(result.bulkInvocations).toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).not.toContain('github-client-secret-line-1');
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration shows redacted Wrangler output when the bulk apply fails',
+    () => {
+      const result = runConfigureSecrets({
+        FAKE_WRANGLER_BULK_FAIL: '1',
+        // Wrangler does not echo values; the stub does, to prove redaction holds.
+        FAKE_WRANGLER_ECHOED_VALUE:
+          'cf-api-token-secret github-client-secret-line-1\ngithub-client-secret-line-2',
+      });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(result.bulkInvocations).toBe(1);
+        expect(result.stderr).toContain('Worker secret bulk configuration failed');
+        expect(result.stderr).toContain(
+          'wrangler: X [ERROR] simulated wrangler failure: Authentication error [code: 10000]'
+        );
+        expect(result.stderr).toContain('line(s) withheld because they contained a secret value');
+        const combinedOutput = `${result.stdout}\n${result.stderr}`;
+        for (const value of [
+          'cf-api-token-secret',
+          'github-client-secret-line-1',
+          'github-client-secret-line-2',
+          'github-app-private-key',
+        ])
+          expect(combinedOutput).not.toContain(value);
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  // An adopted installation (installer-engine-adoption.ts) keeps a VAPID_SUBJECT the fork may
+  // have set as a GitHub-secret override the takeover cannot see.
+  it(
+    'worker secret configuration keeps the secrets an adopted installation names',
+    () => {
+      const preserved = runConfigureSecrets({ PRESERVE_EXISTING_WORKER_SECRETS: 'VAPID_SUBJECT' });
+      const control = runConfigureSecrets();
+      try {
+        expect(preserved.status).toBe(0);
+        expect(control.status).toBe(0);
+        const kept = JSON.parse(preserved.bulkPayload ?? '{}') as Record<string, unknown>;
+        const written = JSON.parse(control.bulkPayload ?? '{}') as Record<string, unknown>;
+        expect(kept).not.toHaveProperty('VAPID_SUBJECT');
+        expect(written).toHaveProperty('VAPID_SUBJECT');
+        expect(preserved.stdout).toContain('Keeping existing VAPID_SUBJECT');
+        // Liveness: the rest of the bulk upload still happens.
+        expect(kept.CF_API_TOKEN).toBe(written.CF_API_TOKEN);
+      } finally {
+        preserved.cleanup();
+        control.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  // A takeover must not change who can get into the SAM it takes over. The installer engine has
+  // none of the fork's sign-in or ownership secrets, so it passes them empty; each must then be
+  // left exactly as the Worker holds it: not rewritten, and not deleted (a `null` entry deletes).
+  it(
+    'worker secret configuration leaves ownership and sign-in secrets alone on an adopted installation',
+    () => {
+      const accessSecrets = {
+        BOOTSTRAP_OWNER_EMAIL: 'BOOTSTRAP_OWNER_EMAIL',
+        AGENT_SIGN_IN_TRUST: 'AGENT_SIGN_IN_TRUST',
+        GITHUB_CLIENT_ID: 'GH_CLIENT_ID',
+        GITHUB_CLIENT_SECRET: 'GH_CLIENT_SECRET',
+        GITHUB_APP_PRIVATE_KEY: 'GH_APP_PRIVATE_KEY',
+        GITHUB_WEBHOOK_SECRET: 'GH_WEBHOOK_SECRET',
+        SMOKE_TEST_AUTH_ENABLED: 'SMOKE_TEST_AUTH_ENABLED',
+      };
+      const unset = Object.fromEntries(Object.values(accessSecrets).map((name) => [name, '']));
+      // What installer-engine.ts passes for an adopted deploy.
+      const adopted = runConfigureSecrets({
+        ...unset,
+        AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: 'true',
+      });
+      // A deploy that does supply them: the same names are written.
+      const supplied = runConfigureSecrets({
+        ...Object.fromEntries(Object.values(accessSecrets).map((name) => [name, `${name}-value`])),
+        BETTER_AUTH_SECRET: 'BETTER_AUTH_SECRET-value',
+        SMOKE_TEST_AUTH_ENABLED: 'true',
+      });
+      try {
+        expect(adopted.status).toBe(0);
+        expect(supplied.status).toBe(0);
+        const kept = JSON.parse(adopted.bulkPayload ?? '{}') as Record<string, unknown>;
+        const written = JSON.parse(supplied.bulkPayload ?? '{}') as Record<string, unknown>;
+        for (const name of Object.keys(accessSecrets)) {
+          expect(Object.hasOwn(kept, name), `${name} must not be written or deleted`).toBe(false);
+          expect(written[name], `${name} is written when supplied`).toEqual(expect.any(String));
+        }
+        // BETTER_AUTH_SECRET is an installation key: no deploy writes it, supplied or not.
+        expect(Object.hasOwn(written, 'BETTER_AUTH_SECRET')).toBe(false);
+        // Liveness: the adopted upload still happened, and the only deletions are the retired names.
+        expect(kept.CF_API_TOKEN).toBe('cf-api-token-secret');
+        const deleted = Object.keys(kept).filter((name) => kept[name] === null);
+        expect(deleted.sort((a, b) => a.localeCompare(b))).toEqual([
+          'AI_PROXY_DEFAULT_MODEL',
+          'AI_PROXY_ENABLED',
+          'ANTHROPIC_API_KEY_TRIAL',
+          'TRIAL_CLAIM_TOKEN_SECRET',
+        ]);
+      } finally {
+        adopted.cleanup();
+        supplied.cleanup();
       }
     },
     CONFIGURE_SECRETS_TIMEOUT_MS
@@ -966,7 +959,7 @@ describe('deployment workflow hardening', () => {
       try {
         expect(result.status).toBe(0);
         const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
-        expect(payload.ENCRYPTION_KEY).toBe('encryption-secret');
+        expect(payload.CF_API_TOKEN).toBe('cf-api-token-secret');
         expect(payload.AGENT_SIGN_IN_TRUST).toBe(expected);
         expect(Object.hasOwn(payload, 'AGENT_SIGN_IN_TRUST')).toBe(expected !== undefined);
       } finally {

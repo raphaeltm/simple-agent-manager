@@ -114,6 +114,7 @@ export function admitBrowserSocket(
       onToolSeal?.();
   }
   const pair = new WebSocketPair();
+  pair[1].serializeAttachment({ accessPending: true });
   ctx.acceptWebSocket(pair[1], tags);
   onAdmitted?.(pair[1], actorId);
   return new Response(null, { status: 101, webSocket: pair[0] });
@@ -146,8 +147,29 @@ export function countLegacySockets(
   return { session, project };
 }
 
+/**
+ * A socket still awaiting its post-admission access check. Attachments survive hibernation.
+ * Legacy sockets have no admission attachment; they keep their existing behavior and are still
+ * closed by actor revocation. An unreadable attachment fails closed: the socket gets no frames.
+ */
+function isAccessPending(ws: WebSocket): boolean {
+  try {
+    const attachment: unknown = ws.deserializeAttachment();
+    return (
+      attachment !== null &&
+      typeof attachment === 'object' &&
+      'accessPending' in attachment &&
+      attachment.accessPending === true
+    );
+  } catch {
+    return true;
+  }
+}
+
 function send(ws: WebSocket, message: string): void {
   try {
+    if (isAccessPending(ws)) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(message);
   } catch {
     /* closed */
@@ -186,8 +208,9 @@ const ACTIVE_PROJECT_ACCESS_SQL = `SELECT 1 AS ok FROM project_members pm
  * forwarding, so a revocation that commits and closes the user's sockets between that check and
  * this admission would find nothing to close. Reading after acceptance covers both orders: a close
  * that runs later finds the socket, and a close that ran earlier committed its D1 write first, so
- * this read sees it. One D1 read per socket opened, never per frame. A failed read keeps the socket:
- * the route's check passed a moment earlier.
+ * this read sees it. The socket is visible to revocation throughout, but its persisted pending
+ * attachment prevents broadcasts until the read confirms access. A failed read closes with a
+ * retryable outcome. One D1 read per socket opened, never per frame.
  */
 export async function closeIfAccessRevoked(
   db: D1Database,
@@ -197,7 +220,11 @@ export async function closeIfAccessRevoked(
 ): Promise<void> {
   try {
     const row = await db.prepare(ACTIVE_PROJECT_ACCESS_SQL).bind(projectId, actorId).first();
-    if (row) return;
+    if (row) {
+      // No await between this check and promotion: a concurrent revocation close wins.
+      if (ws.readyState === WebSocket.OPEN) ws.serializeAttachment({ accessPending: false });
+      return;
+    }
     log.warn('websocket.admitted_after_revocation', { projectId, actorId, action: 'closed' });
     closeQuietly(ws, BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE, 'project access revoked');
   } catch (err) {
@@ -205,8 +232,9 @@ export async function closeIfAccessRevoked(
       projectId,
       actorId,
       error: err instanceof Error ? err.message : String(err),
-      action: 'kept_open',
+      action: 'closed_retryable',
     });
+    closeQuietly(ws, 1013, 'access verification unavailable');
   }
 }
 
@@ -263,6 +291,10 @@ export function broadcastToBrowserSockets(
     return;
   }
   for (const ws of ctx.getWebSockets(sessionTag(sessionId))) {
+    // A pending socket has received nothing, and its client reads the newest messages once it
+    // opens, so it does not need a resync close. Closing it here would also stop the access
+    // check from promoting it, and steady streaming would close every reconnect the same way.
+    if (isAccessPending(ws)) continue;
     const tags = tagsOf(ctx, ws);
     if (!tags) continue;
     if (

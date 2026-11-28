@@ -13,6 +13,7 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 | `src/content/blog/` | Blog posts (Markdown with frontmatter) |
 | `src/pages/index.astro` | Landing page |
 | `src/components/factory/` | Homepage (`FactoryHome.astro`): hero, "the floor" (infrastructure over the glass node floor), the six-stage "how work moves" line with its sticky rail, roles, questions and CTA. `Shot.astro` renders one real SAM screen in the active theme and loads it near the viewport |
+| `src/components/factory/SecurityNotice.astro` | The homepage's amber security warning at the top of the hero. It renders only while the setup-takeover advisory is pinned (`isPinnedAt()` in `src/lib/blog-utils.ts`), so the advisory's `pinned` / `pinnedUntil` frontmatter turns both off |
 | `src/data/factory-shots.ts`, `src/data/factory-stages.ts` | The homepage's real screens (sizes, alt text) and its stages (copy, highlight rings). `SINGLE_VM_INSTALL_SHIPPED` labels the single-VM control plane "soon" until it ships |
 | `public/images/factory/README.md` | How each homepage screen was captured and cropped (dark + light, desktop + phone) |
 | `src/lib/motion.ts` | Motion helpers shared by the brand guide: reduced-motion and fine-pointer queries, and the pointer follower used for tilt |
@@ -39,7 +40,7 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 
 ## Conventions
 
-- Blog posts are Markdown (`.md`; the collection does not load `.mdx`) with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft` and `socialImage`). Posts about UI embed renders of the real app from `public/images/blog/<slug>/`; see "UI Renders" in `src/content/CLAUDE.md`
+- Blog posts are Markdown (`.md`; the collection does not load `.mdx`) with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft`, `pinned`, `pinnedUntil` and `socialImage`; `pinned` puts a post first on the blog index until `pinnedUntil`, checked at build time). Posts about UI embed renders of the real app from `public/images/blog/<slug>/`; see "UI Renders" in `src/content/CLAUDE.md`
 - Code blocks in docs and blog are rendered by Expressive Code: plugins (line numbers, language tab) in `src/lib/expressive-code.ts`, registered in `astro.config.ts`. Blog pages give it Starlight's theme variables in `src/styles/blog-code.css`
 - Documentation lives in `src/content/docs/` following Starlight conventions
 - Assets are pre-built via `build:assets` (tracker script + blog Mermaid bundle)
@@ -53,6 +54,7 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 
 - Astro caches rendered Markdown, including each code block's `<link>` to the hashed `ec.*.css`, in `node_modules/.astro/data-store.json`. After changing Expressive Code settings, delete that file before building or previewing, or code blocks link a stylesheet that no longer exists and render unstyled. CI builds start clean.
 - Brand guide motion: markup is the final frame, `html.bg-motion` (set only when motion is allowed) gates every hidden or scroll-linked state, and nothing plays on its own for more than 5 s. A `data-reveal="wipe"` element starts clipped to nothing, so it uses its own threshold-0 observer; IntersectionObserver measures the clipped box. When a brand colour, font or rule changes, update `src/data/brand.ts` and the guide in the same PR.
+- Build-time dates (a post's `pinnedUntil`) only change the live site when it is rebuilt; `deploy-www.yml` runs daily on a schedule for that reason.
 - `pnpm build:assets` runs before both `dev` and `build` — if you add new scripts, wire them there
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain

@@ -8,13 +8,18 @@ close is one RPC made after the revocation commits. Gaps that remain:
 
 1. **Failed close.** If the DO RPC fails, offboarding only logs `project_sockets.close_failed`
    (it cannot be re-applied once the member is removed). Suspension answers 503 so the admin can
-   retry, but nothing retries on its own.
+   retry, but nothing retries on its own. The suspension retry also reaches memberships removed
+   after the suspension began (`closeSuspendedUserSockets`, task
+   `2026-11-23-suspension-retry-removed-memberships.md`).
 2. **Sign-out and session revocation** do not close sockets (stolen-cookie scenario only; no
    cross-user boundary). A membership/status reconcile would not catch this: the user is still an
    active member with a non-suspended account. It needs a session-level mechanism, for example
    tagging sockets with the BetterAuth session id and closing them from a session-delete hook.
-3. (Fixed in #2867: the admission race is closed by `closeIfAccessRevoked`, a D1 re-check right
-   after the DO admits a socket.)
+3. Admission race: #2867 re-checks access after acceptance but initially allowed broadcasts
+   while the check was pending and kept sockets on lookup failure. The follow-up
+   `tasks/active/2026-11-23-project-socket-admission.md` gates broadcasts with a hibernation
+   attachment until access is confirmed, closes failed checks with retryable1013, and prevents
+   a late positive result from promoting a socket that revocation already closed.
 4. **Sibling long-lived sockets** have the same shape and no close on revocation:
    - NotificationService `/ws` (`apps/api/src/routes/notifications.ts`) after suspension;
    - admin log streams (`apps/api/src/routes/admin/observability.ts`, `admin-logs`) after a

@@ -293,37 +293,118 @@ const BATCH_DELAY_MS = parseInt(
   10
 );
 
+export interface SessionListSnapshot {
+  sessions: ChatSessionListItem[];
+  revision: number;
+}
+
+/** Fields the existing reducer actually applies; creation defaults are not live patches. */
+function eventFields(event: SessionEvent): string[] {
+  switch (event.type) {
+    case 'session.updated':
+      return Object.entries(event.payload)
+        .filter(([key, value]) => key !== 'sessionId' && value !== undefined)
+        .map(([key]) => key);
+    case 'session.stopped':
+    case 'session.failed':
+      return ['status', 'isTerminated', 'endedAt'];
+    case 'session.agent_completed':
+      return ['agentCompletedAt', 'isIdle'];
+    case 'attention.created':
+    case 'attention.resolved':
+      return ['attention'];
+    default:
+      return [];
+  }
+}
+
 export function useSessionReducer() {
   const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
+  const sessionsRef = useRef(sessions);
+  const revision = useRef(0);
+  // Weak row keys keep only fixed per-field revisions for current row objects, never events.
+  const fieldRevisions = useRef(new WeakMap<ChatSessionListItem, ReadonlyMap<string, number>>());
   const batchRef = useRef<SessionEvent[]>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyTrackedEvents = useCallback(
+    (current: ChatSessionListItem[], events: SessionEvent[]) => {
+      for (const event of events) {
+        const id = event.type === 'session.created' ? event.payload.id : event.payload.sessionId;
+        const previous = current.find((session) => session.id === id);
+        const next = applySessionEvent(current, event);
+        const changed = next.find((session) => session.id === id);
+        if (changed && changed !== previous) {
+          const fields = new Map(previous ? fieldRevisions.current.get(previous) : undefined);
+          const stamp = ++revision.current;
+          for (const field of eventFields(event)) fields.set(field, stamp);
+          fieldRevisions.current.set(changed, fields);
+        }
+        current = next;
+      }
+      return current;
+    },
+    []
+  );
 
   const flushBatch = useCallback(() => {
     batchTimerRef.current = null;
     const events = batchRef.current;
     if (events.length === 0) return;
     batchRef.current = [];
-    setSessions((prev) => applySessionEvents(prev, events));
-  }, []);
+    sessionsRef.current = applyTrackedEvents(sessionsRef.current, events);
+    setSessions(sessionsRef.current);
+  }, [applyTrackedEvents]);
 
   const dispatchEvent = useCallback(
     (event: SessionEvent) => {
       batchRef.current.push(event);
-      if (!batchTimerRef.current) {
-        batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
-      }
+      if (!batchTimerRef.current) batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
     },
     [flushBatch]
   );
 
-  const resetSessions = useCallback((next: ChatSessionListItem[]) => {
-    batchRef.current = [];
-    if (batchTimerRef.current) {
-      clearTimeout(batchTimerRef.current);
+  const captureSnapshot = useCallback((): SessionListSnapshot => {
+    if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
+    flushBatch();
+    return { sessions: sessionsRef.current, revision: revision.current };
+  }, [flushBatch]);
+
+  const resetSessions = useCallback(
+    (next: ChatSessionListItem[], before?: SessionListSnapshot) => {
+      const pending = batchRef.current;
+      batchRef.current = [];
+      if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
       batchTimerRef.current = null;
-    }
-    setSessions(next);
-  }, []);
+      if (before) {
+        const baseline = new Set(before.sessions.map((session) => session.id));
+        const current = new Map(sessionsRef.current.map((session) => [session.id, session]));
+        const received = new Set(next.map((session) => session.id));
+        next = next.map((session) => {
+          const live = current.get(session.id);
+          if (!live) return session;
+          const fields = fieldRevisions.current.get(live);
+          const changes = Object.fromEntries(
+            Object.entries(live).filter(([key]) => (fields?.get(key) ?? 0) > before.revision)
+          );
+          const merged = { ...session, ...changes };
+          if (fields) fieldRevisions.current.set(merged, fields);
+          return merged;
+        });
+        // Newly created rows may not exist in the request's snapshot; server removals stay removed.
+        next = [
+          ...next,
+          ...[...current.values()].filter(
+            (session) => !baseline.has(session.id) && !received.has(session.id)
+          ),
+        ];
+        next = applyTrackedEvents(next, pending);
+      }
+      sessionsRef.current = next;
+      setSessions(next);
+    },
+    [applyTrackedEvents]
+  );
 
   useEffect(() => {
     return () => {
@@ -331,5 +412,5 @@ export function useSessionReducer() {
     };
   }, []);
 
-  return { sessions, dispatchEvent, resetSessions };
+  return { sessions, dispatchEvent, resetSessions, captureSnapshot };
 }

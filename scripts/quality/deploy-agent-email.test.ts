@@ -279,6 +279,53 @@ describe('configureAgentEmail (prepare only)', () => {
     });
   });
 
+  // An adopted installation (installer-engine.ts) deploys with `existingOnly`: a takeover promises
+  // to create nothing, and its no-change checks do not cover this step's Cloudflare writes.
+  it('with existingOnly, leaves a zone without a sending subdomain exactly as it is', async () => {
+    const fake = new FakeCloudflare();
+    const outcome = await configureAgentEmail(fake.request, {
+      zoneId: ZONE,
+      baseDomain: 'fixture.example',
+      existingOnly: true,
+    });
+    expect(outcome).toEqual({
+      status: 'skipped',
+      reason:
+        'agents.fixture.example is not set up for sending, and this deploy does not set it up',
+    });
+    expect(fake.writes()).toBe(0);
+    expect(fake.sending).toEqual([]);
+    // Control: the same zone without the option is onboarded.
+    const control = new FakeCloudflare();
+    expect((await run(control)).status).toBe('prepared');
+    expect(control.writes()).toBeGreaterThan(0);
+  });
+
+  it('with existingOnly, uses a sending subdomain that exists and repairs none of its records', async () => {
+    const fake = new FakeCloudflare();
+    expect((await run(fake)).status).toBe('prepared');
+    // One of the sending records has since been deleted.
+    const removed = fake.dns.findIndex((record) => record.name.startsWith('_dmarc.'));
+    expect(removed).toBeGreaterThan(-1);
+    fake.dns.splice(removed, 1);
+    const writesBefore = fake.writes();
+    const outcome = await configureAgentEmail(fake.request, {
+      zoneId: ZONE,
+      baseDomain: 'fixture.example',
+      existingOnly: true,
+    });
+    expect(outcome).toEqual({
+      status: 'prepared',
+      domain: 'agents.fixture.example',
+      writes: 0,
+      sendingVerified: false,
+    });
+    expect(fake.writes()).toBe(writesBefore);
+    // Control: without the option the missing record is created again.
+    expect((await run(fake)).status).toBe('prepared');
+    expect(fake.writes()).toBe(writesBefore + 1);
+  });
+
   it('is idempotent', async () => {
     const fake = new FakeCloudflare();
     await run(fake);

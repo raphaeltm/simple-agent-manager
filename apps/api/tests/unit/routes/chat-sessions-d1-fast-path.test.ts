@@ -262,6 +262,98 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
     );
   });
 
+  describe('consistency=authoritative (socket subscription catch-up)', () => {
+    // A fresh, complete index that has not yet synced a session the DO already holds:
+    // the summary sync is debounced, so a session created while the browser's socket
+    // was closed can be missing from D1 for seconds after the socket reopens.
+    beforeEach(() => {
+      addIndexedSession('from-d1');
+      setCoverage();
+      mocks.listSessions.mockResolvedValue({
+        sessions: [{ id: 'created-during-gap' }, { id: 'from-d1' }],
+        total: 2,
+        hasMore: false,
+      });
+    });
+
+    it('control: an ordinary read is served by the lagging index', async () => {
+      const { body } = await listSessions('?limit=100&include=live');
+
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'from-d1',
+      ]);
+      expect(mocks.listSessions).not.toHaveBeenCalled();
+    });
+
+    it('reads the Durable Object and returns sessions the index has not synced yet', async () => {
+      const { status, body } = await listSessions(
+        '?limit=100&include=live&consistency=authoritative'
+      );
+
+      expect(status).toBe(200);
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'created-during-gap',
+        'from-d1',
+      ]);
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 100, 0, null, null);
+      // It never consulted the index, so it has no index failure to repair.
+      expect(mocks.log.warn).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^session_index_prime/),
+        expect.anything()
+      );
+    });
+
+    it('keeps the caller creator scope for scope=my', async () => {
+      await listSessions('?limit=100&include=live&scope=my&consistency=authoritative');
+
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 100, 0, null, OWNER);
+    });
+
+    it('keeps pagination and the live-session top-up', async () => {
+      mocks.listSessions.mockImplementation(async (_env, _projectId, status: string | null) => {
+        if (status === null) {
+          return { sessions: [{ id: 'created-during-gap' }], total: 3, hasMore: true };
+        }
+        if (status === 'active') return { sessions: [{ id: 'old-awake' }], total: 1 };
+        return { sessions: [], total: 0 };
+      });
+
+      const { body } = await listSessions(
+        '?limit=1&offset=0&include=live&consistency=authoritative'
+      );
+
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'created-during-gap',
+        'old-awake',
+      ]);
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, null, 1, 0, null, null);
+    });
+
+    it('rejects a non-member before reading the Durable Object', async () => {
+      app.onError((err, c) =>
+        c.json({ error: err.message }, ((err as { statusCode?: number }).statusCode ?? 500) as 404)
+      );
+      mocks.requireProjectAccess.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
+      );
+
+      const { status } = await listSessions('?include=live&consistency=authoritative');
+
+      expect(status).toBe(404);
+      expect(mocks.listSessions).not.toHaveBeenCalled();
+    });
+
+    it('ignores any other consistency value', async () => {
+      const { body } = await listSessions('?include=live&consistency=strong');
+
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'from-d1',
+      ]);
+      expect(mocks.listSessions).not.toHaveBeenCalled();
+    });
+  });
+
   describe('include=live', () => {
     it('reads live sessions the page left out from the DO when the index cannot answer', async () => {
       // No coverage: the DO serves the page, then each live status.

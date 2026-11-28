@@ -89,7 +89,7 @@ work, or planning in one of these areas, open the rule yourself.
 - `34-vm-agent-callback-auth.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE). Loads for: apps/api; packages/ai-proxy; packages/vm-agent
 - `36-cli-quality.md`: CLI Quality Bar. Loads for: packages/cli; .github (workflows/ci.yml); sonar-project.properties
 - `37-prototype-development.md`: Prototype Development. Loads for: apps/web; packages/ui (src/tokens/theme.css)
-- `40-sentinel-rows-excluded-from-counts.md`: Internal/Sentinel Rows Must Be Excluded From Business-Logic Counts. Loads for: apps/api
+- `40-sentinel-rows-excluded-from-counts.md`: Internal/Sentinel Rows Must Be Excluded From Business-Logic Counts. Loads for: apps/api; scripts (deploy/installation-keys.ts)
 - `43-long-running-mcp-tools.md`: Long-Running MCP Tools Must Be Async. Loads for: apps/api; packages/operations; packages/vm-agent (internal/server/mcp_build.go)
 - `44-dual-write-migration-enumerate-writers.md`: Storage Migrations Must Enumerate Every Writer of the Migrated Data. Loads for: apps/api; packages/project-data; packages/worker-core
 - `45-durable-object-concurrency-mutex.md`: Durable Objects Do Not Serialize Across `await` — Use a Real Mutex for Critical Sections. Loads for: apps/api; packages/project-data; packages/ai-proxy (src/ai-token-budget-counter.ts)

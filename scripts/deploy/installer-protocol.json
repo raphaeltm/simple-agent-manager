@@ -1,7 +1,13 @@
 {
   "schemaVersion": 1,
   "protocolVersion": 1,
-  "capabilities": ["source-build", "durable-maintenance", "owner-binding", "resumable-deploy"],
+  "capabilities": [
+    "source-build",
+    "durable-maintenance",
+    "owner-binding",
+    "resumable-deploy",
+    "adoption"
+  ],
   "entrypoints": {
     "bootstrap": "scripts/deploy/installer-builder-bootstrap.sh",
     "engine": "scripts/deploy/installer-engine-cli.ts"

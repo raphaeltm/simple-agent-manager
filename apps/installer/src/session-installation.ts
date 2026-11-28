@@ -1,6 +1,7 @@
+import { previewAdoption, validStateBucketName } from './adoption-plan';
 import type { BootstrapCleanup } from './cleanup';
 import { createInstallationCredentials } from './credentials';
-import { previewInstallation } from './installation-plan';
+import { type InstallationPlan, previewInstallation } from './installation-plan';
 import { provision } from './provision';
 import { json, randomSecret } from './security';
 import type { Env, Session } from './types';
@@ -46,11 +47,32 @@ export class SessionInstallation {
       )
     )
       return json({ error: 'Select an authorized account and zone first' }, 400);
-    const plan = await previewInstallation(session.token, {
-      ...input,
+    const { adopt, statePassphrase, stateBucket, ...settings } = input;
+    if (adopt === true && !validPassphrase(statePassphrase))
+      return json(
+        { error: 'Enter the deploy-state passphrase your existing SAM deployment uses.' },
+        400
+      );
+    if (adopt === true && !validStateBucketName(stateBucket))
+      return json(
+        {
+          error: 'Enter the name of the R2 bucket that holds your deploy state, or leave it empty.',
+        },
+        400
+      );
+    // Only a takeover has a state bucket to name; empty means "find it by its usual name".
+    const named = adopt === true && typeof stateBucket === 'string' && stateBucket !== '';
+    const plan = await (adopt === true ? previewAdoption : previewInstallation)(session.token, {
+      ...settings,
+      ...(named ? { stateBucket } : {}),
       sourceCommit: this.env.INSTALL_SOURCE_COMMIT,
     });
     session.plan = plan;
+    // Never part of the plan: the plan is returned to the browser and becomes INSTALLATION_CONFIG.
+    if (adopt === true) session.adoptionPassphrase = statePassphrase as string;
+    else delete session.adoptionPassphrase;
+    if (named) session.adoptionStateBucket = stateBucket;
+    else delete session.adoptionStateBucket;
     await this.ctx.storage.put('session', session);
     return json({ plan });
   }
@@ -105,6 +127,7 @@ export class SessionInstallation {
           signal: workSignal,
           cleanupTimeoutMs: limits.reserve,
           authorityExpiresAt: session.tokenExpires,
+          ...(session.plan.adoption ? { pulumiPassphrase: session.adoptionPassphrase } : {}),
           journal: async (tokenIds) => {
             session.credentialTokenIds = tokenIds;
             await this.ctx.storage.put('session', session);
@@ -170,7 +193,9 @@ export class SessionInstallation {
         { error: 'Preview and approve an installation without DNS conflicts first.' },
         409
       );
-    const fresh = await previewInstallation(session.token, session.plan);
+    if (session.plan.adoption && !validPassphrase(session.adoptionPassphrase))
+      return json({ error: 'Review the takeover again.' }, 409);
+    const fresh = await planAgain(session.token, session.plan, session.adoptionStateBucket);
     if (fresh.fingerprint !== fingerprint || fresh.conflicts.length)
       return json({ error: 'The installation plan changed. Review it again.' }, 409);
     if (session.job && session.job.fingerprint !== session.plan.fingerprint)
@@ -178,4 +203,24 @@ export class SessionInstallation {
 
     return undefined;
   }
+}
+
+/** Re-reviews an approved plan the same way it was first reviewed. */
+function planAgain(
+  token: string,
+  plan: InstallationPlan,
+  namedStateBucket?: string
+): Promise<InstallationPlan> {
+  return plan.adoption
+    ? previewAdoption(token, { ...plan, stateBucket: namedStateBucket })
+    : previewInstallation(token, plan);
+}
+
+/** A deploy-state passphrase as the owner saved it; bounded, never inspected further. */
+/**
+ * An existing deployment's passphrase is whatever its owner chose: the fork workflow requires
+ * only that it is not empty, and a takeover cannot strengthen a stack that is already encrypted.
+ */
+function validPassphrase(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 1024;
 }

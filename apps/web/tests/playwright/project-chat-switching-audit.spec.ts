@@ -355,7 +355,7 @@ test.describe('project chat — instant switching audit', () => {
     await screenshot(page, `project-chat-switching-long-older-paged-in-${viewport}`);
   });
 
-  test('a chat whose newest page folds into a few rows opens on that page alone', async ({
+  test('a chat whose newest page folds into a few rows opens and revalidates only that page', async ({
     page,
   }, testInfo) => {
     const viewport = testInfo.project.name.startsWith('iPhone') ? 'mobile' : 'desktop';
@@ -370,9 +370,15 @@ test.describe('project chat — instant switching audit', () => {
     // once. Give its debounced callback ample time: nothing older may load until
     // the reader asks for it.
     await page.waitForTimeout(1_500);
+    // Initial read plus the bounded first-subscription snapshot repair. Neither
+    // may drain older pages just because the folded transcript fits onscreen.
+    await expect
+      .poll(() => requests.filter((r) => r.sessionId === TOOLS.id && r.after === null).length)
+      .toBe(2);
     const opened = requests.filter((r) => r.sessionId === TOOLS.id);
     expect(opened.filter((r) => r.before !== null)).toHaveLength(0);
     expect(opened.filter((r) => r.after === null)).toEqual([
+      { sessionId: TOOLS.id, limit: '500', before: null, after: null },
       { sessionId: TOOLS.id, limit: '500', before: null, after: null },
     ]);
     // Revisiting a cached chat triggers catch-up deterministically, including

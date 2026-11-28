@@ -1416,6 +1416,17 @@ export interface Env
   COST_MONITORING_ENABLED?: string; // Enable/disable cost monitoring endpoint (default: true)
   /** Deployment environment name ("staging" | "production"), set by the deploy pipeline. */
   ENVIRONMENT?: string;
+  /**
+   * Deploy-time lock for the test-only fake AI upstream (`services/ai-test-upstream.ts`). Only
+   * the exact value "true" opens it, and never where ENVIRONMENT is "production". Absent by default.
+   */
+  AI_TEST_UPSTREAM_ENABLED?: string;
+  /**
+   * AI Gateway path segment of the staging-only fake upstream's custom provider
+   * (`custom-<prefix>-test-upstream`). Set by the deploy pipeline on staging stacks only
+   * (`scripts/deploy/fake-ai-upstream-plan.ts`); with an AI Gateway, faked calls go there.
+   */
+  AI_TEST_UPSTREAM_GATEWAY_PROVIDER?: string;
   // Cloudflare Artifacts (GitHub-optional project creation)
   /** Kill switch — set to 'true' to enable Artifacts as a repo provider. */
   ARTIFACTS_ENABLED?: string;

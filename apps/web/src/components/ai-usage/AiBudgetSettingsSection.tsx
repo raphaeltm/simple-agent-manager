@@ -23,7 +23,7 @@ function BudgetBar({
 }) {
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
   const format = unit === '$' ? formatCost : formatTokens;
-  const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent-emphasis';
+  const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent';
 
   return (
     <div className="space-y-1">

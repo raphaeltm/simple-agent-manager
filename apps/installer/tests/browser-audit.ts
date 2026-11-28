@@ -10,112 +10,10 @@ import { maintenanceSource } from '../src/maintenance';
 import { digest } from '../src/security';
 import { InstallerSession } from '../src/session';
 import type { Env, Session } from '../src/types';
+import { installFixtureRoutes } from './browser-audit-routes';
+import { auditTakeoverPanel } from './browser-audit-takeover';
 const output = '../../.codex/tmp/playwright-screenshots';
 
-async function installFixtureRoutes(
-  page: Page,
-  getState: () => string,
-  setState: (value: string) => void,
-  previewState: { attempts: number } = { attempts: 0 },
-  installGate: { release: () => void; hold: Promise<void> } = {
-    release: () => {},
-    hold: Promise.resolve(),
-  }
-) {
-  await page.route('**/api/config', (r) =>
-    r.fulfill({
-      json: {
-        configured: getState() !== 'unconfigured',
-        fullInstaller: getState().startsWith('full-'),
-        sourceUrl: 'https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer',
-        docsUrl: '/self-host.html',
-        sha: 'audit-fixture',
-      },
-    })
-  );
-  await page.route('**/api/session/status', (r) =>
-    ['connect', 'unconfigured', 'authorization'].includes(getState())
-      ? r.fulfill({ status: 401, json: { error: 'Sign in' } })
-      : r.fulfill({
-          json: {
-            currentCleanupReceipt: 'e'.repeat(64),
-            accounts:
-              getState() === 'empty'
-                ? []
-                : Array.from({ length: 35 }, (_, i) => ({
-                    id: String(i).padStart(32, 'a'),
-                    name:
-                      i === 0
-                        ? 'Organization <script>alert(1)</script> & équipe 🧑‍💻 '.repeat(6)
-                        : `Account ${i}`,
-                  })),
-            job:
-              getState() === 'ready' || getState() === 'pending'
-                ? { status: getState(), name: 'sam-maintenance-1234567890123456' }
-                : null,
-          },
-        })
-  );
-  await page.route('**/api/session/zones', (r) =>
-    r.fulfill({ json: { zones: [{ id: 'b'.repeat(32), name: 'example.com' }] } })
-  );
-  await page.route('**/api/session/preview', (r) => {
-    if (getState() === 'full-expired')
-      return r.fulfill({
-        status: 401,
-        json: { error: 'Your installer session expired. Sign in again.' },
-      });
-    let conflicts: Array<{ name: string; type: string }> = [];
-    if (getState() === 'full-conflict')
-      conflicts = [{ name: 'api.sam.example.com', type: 'CNAME' }];
-    if (getState() === 'full-flow') {
-      previewState.attempts++;
-      // The first review attempt hits a conflict; "Check again" resolves it,
-      // the way a real re-run would after the owner clears the blocking record.
-      conflicts =
-        previewState.attempts === 1 ? [{ name: 'api.sam.example.com', type: 'CNAME' }] : [];
-    }
-    return r.fulfill({
-      json: {
-        plan: {
-          sourceCommit: 'c'.repeat(40),
-          fingerprint: 'd'.repeat(64),
-          workersDev: { action: 'create', subdomain: 'sam-account' },
-          hostnames: [
-            'api.sam.example.com',
-            'app.sam.example.com',
-            'preview.sam.example.com',
-            '*.sam.example.com',
-          ],
-          conflicts,
-        },
-      },
-    });
-  });
-  await page.route('**/api/session/install', async (r) => {
-    if (getState() === 'error')
-      return r.fulfill({
-        status: 500,
-        json: {
-          error:
-            'Cloudflare could not complete this step. Try again. Details: POST /workers/scripts returned HTTP 403 (codes 10000). No credentials were logged.',
-        },
-      });
-    // Held open by 'installing' until the test releases it, so the busy
-    // button state is genuinely observed rather than hand-fed.
-    if (getState() === 'installing') await installGate.hold;
-    setState('ready');
-    return r.fulfill({ json: { ok: true } });
-  });
-  await page.route('**/api/session/reconcile-cleanup', async (r) => {
-    expect(r.request().postDataJSON()).toEqual({
-      receipt: 'd'.repeat(64),
-      accountId: 'a'.repeat(31) + '0',
-    });
-    await r.fulfill({ json: { ok: true, authorityPreserved: true } });
-  });
-  await page.route('**/api/session/finish', (r) => r.fulfill({ json: { revoked: true } }));
-}
 async function assertNoOverflow(page: Page, label: string) {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
     throw new Error(label + ' overflow');
@@ -203,6 +101,119 @@ async function auditFullChoose(page: Page) {
   await expect(page.locator('#mode-note')).toBeHidden();
   await expect(page.locator('#trust')).toBeHidden();
 }
+/** Opens the takeover opt-in and fills it: optional inputs, collapsed and unchecked by default. */
+async function fillTakeover(page: Page, bucket: string) {
+  await auditFullChoose(page);
+  await expect(page.locator('#adopt-details')).not.toHaveAttribute('open', '');
+  await page.locator('#adopt-details summary').click();
+  await expect(page.locator('#adopt-existing')).not.toBeChecked();
+  for (const id of ['#adopt-existing', '#state-passphrase', '#state-bucket'])
+    expect(await page.locator(id).evaluate((el) => (el as HTMLInputElement).required)).toBe(false);
+  await page.locator('#adopt-existing').check();
+  await page.locator('#state-passphrase').fill('existing state passphrase');
+  await page.locator('#state-bucket').fill(bucket);
+  // Nothing in the block may be clipped by the card: the page-level overflow check cannot see it.
+  const inside = await page.locator('#adopt-details').evaluate((details) => {
+    const box = details.getBoundingClientRect();
+    return [...details.querySelectorAll('input, label, p, code')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.left >= box.left - 1 && r.right <= box.right + 1;
+    });
+  });
+  expect(inside).toBe(true);
+}
+/** The takeover review: inputs sent exactly, and an approval that is never pre-checked. */
+async function auditFullAdopt(page: Page) {
+  // Typed with stray capitals and spaces; the browser sends the bucket name normalized.
+  await fillTakeover(page, ' Team-Deploy-State ');
+  await page.locator('#preview').click();
+  await expect(page.locator('#review')).toBeVisible();
+  await expect(page.locator('#plan-summary-line')).toContainText(
+    'Your installation service will take over the SAM at app.sam.example.com in Account 1.'
+  );
+  await expect(page.locator('#confirm-full-copy')).toContainText(
+    'I approve the takeover itself there, after it checks that deploying SAM creates, replaces or deletes none of its resources.'
+  );
+  await expect(page.locator('#install')).toHaveText('Create my installation service\u00a0→');
+  await expect(page.locator('#plan-details summary')).toHaveText('What it will take over');
+  await page.locator('#plan-details summary').click();
+  await expect(page.locator('#plan-summary')).toContainText('Takes over');
+  // A takeover sets up no email, so the review must not promise sign-in codes or new records.
+  await expect(page.locator('#plan-summary')).toContainText(
+    'Stays as it is. If your SAM sends sign-in codes from agents.sam.example.com, it keeps doing so. If it does not, the takeover does not set that up.'
+  );
+  await expect(page.locator('#plan-summary')).not.toContainText('sending records are added');
+  await expect(page.locator('#plan-summary')).toContainText('team-deploy-state');
+  await expect(page.locator('#plan-summary')).toContainText(
+    "Your installation service gets access to that whole bucket. The deployment's data"
+  );
+  await expect(page.locator('#confirm-full')).not.toBeChecked();
+  await expect(page.locator('#install')).toBeDisabled();
+}
+/** The review of a new installation: nothing is approved until the owner ticks the box. */
+async function auditFullReview(page: Page) {
+  await auditFullChoose(page);
+  await page.locator('#preview').click();
+  await expect(page.locator('#review')).toBeVisible();
+  // The app hostname comes from the server's own plan.hostnames, not a
+  // client-side reconstruction of the (possibly different) base-domain
+  // input — this fixture's plan intentionally returns a distinct domain.
+  await expect(page.locator('#plan-summary-line')).toContainText(
+    'SAM will live at app.sam.example.com in Account 1. Cloudflare usage charges apply.'
+  );
+  await expect(page.locator('#plan-details')).toBeVisible();
+  await expect(page.locator('#plan-summary')).toBeHidden();
+  await expect(page.locator('#install')).toHaveText('Install SAM in my account\u00a0→');
+  await expect(page.locator('#plan-details summary')).toHaveText('What will be created');
+  await page.locator('#plan-details summary').click();
+  await expect(page.locator('#plan-summary')).toContainText('sam-account.workers.dev (new)');
+  await expect(page.locator('#plan-summary')).toContainText(
+    'Sign-in codes come from agents.sam.example.com. Its sending records are added under that name only.'
+  );
+  await expect(page.locator('#plan-summary')).not.toContainText('Initialize account address');
+  await expect(page.locator('#review-blocked')).toBeHidden();
+  await expect(page.locator('#review-form')).toBeVisible();
+  await expect(page.locator('#confirm-full')).not.toBeChecked();
+  await expect(page.locator('#install')).toBeDisabled();
+  await page.locator('#confirm-full').check();
+  await expect(page.locator('#install')).toBeEnabled();
+  await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
+  await expect(page.locator('#step-review')).not.toHaveClass(/skipped/);
+}
+/** A conflicting DNS record blocks the installation until it is resolved. */
+async function auditFullConflict(page: Page) {
+  await auditFullChoose(page);
+  await page.locator('#preview').click();
+  await expect(page.locator('#review')).toBeVisible();
+  await expect(page.locator('#message > p')).toContainText('block installation');
+  await expect(page.locator('#plan-details')).toBeHidden();
+  await expect(page.locator('#review-blocked')).toBeVisible();
+  await expect(page.locator('#review-form')).toBeHidden();
+  await expect(
+    page.getByRole('button', { name: 'Use a different domain', exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: "I've removed them — check again", exact: true })
+  ).toBeVisible();
+  // The install action is unavailable while a conflict exists.
+  await expect(page.locator('#install')).toBeHidden();
+  await expect(page.locator('#back-to-choose')).toBeVisible();
+}
+/** What each full-installer scenario checks after the page has loaded. */
+const FULL_SCENARIOS: Record<string, (page: Page) => Promise<void>> = {
+  'full-choose': auditFullChoose,
+  'full-review': auditFullReview,
+  // The longest bucket name R2 allows, to stress the takeover form at every width.
+  'full-adopt-form': (page) => fillTakeover(page, `team-${'deploy-state-'.repeat(4)}bucket`),
+  'full-adopt': auditFullAdopt,
+  'full-conflict': auditFullConflict,
+};
+/** A full-installer scenario with no checks would pass having asserted nothing, so it throws. */
+function fullScenarioChecks(scenario: string): (page: Page) => Promise<void> {
+  const checks = FULL_SCENARIOS[scenario];
+  if (!checks) throw new Error(`No checks are defined for scenario ${scenario}`);
+  return checks;
+}
 async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   if (scenario === 'cleanup')
     await page.evaluate(() =>
@@ -239,49 +250,7 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   expect(stepBounds).toBe(true);
   if (!scenario.startsWith('full-'))
     await expect(page.locator('#step-review')).toHaveClass(/skipped/);
-  if (scenario === 'full-choose') await auditFullChoose(page);
-  if (scenario === 'full-review') {
-    await auditFullChoose(page);
-    await page.locator('#preview').click();
-    await expect(page.locator('#review')).toBeVisible();
-    // The app hostname comes from the server's own plan.hostnames, not a
-    // client-side reconstruction of the (possibly different) base-domain
-    // input — this fixture's plan intentionally returns a distinct domain.
-    await expect(page.locator('#plan-summary-line')).toContainText(
-      'SAM will live at app.sam.example.com in Account 1. Cloudflare usage charges apply.'
-    );
-    await expect(page.locator('#plan-details')).toBeVisible();
-    await expect(page.locator('#plan-summary')).toBeHidden();
-    await page.locator('#plan-details summary').click();
-    await expect(page.locator('#plan-summary')).toContainText('sam-account.workers.dev (new)');
-    await expect(page.locator('#plan-summary')).not.toContainText('Initialize account address');
-    await expect(page.locator('#review-blocked')).toBeHidden();
-    await expect(page.locator('#review-form')).toBeVisible();
-    await expect(page.locator('#confirm-full')).not.toBeChecked();
-    await expect(page.locator('#install')).toBeDisabled();
-    await page.locator('#confirm-full').check();
-    await expect(page.locator('#install')).toBeEnabled();
-    await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
-    await expect(page.locator('#step-review')).not.toHaveClass(/skipped/);
-  }
-  if (scenario === 'full-conflict') {
-    await auditFullChoose(page);
-    await page.locator('#preview').click();
-    await expect(page.locator('#review')).toBeVisible();
-    await expect(page.locator('#message > p')).toContainText('block installation');
-    await expect(page.locator('#plan-details')).toBeHidden();
-    await expect(page.locator('#review-blocked')).toBeVisible();
-    await expect(page.locator('#review-form')).toBeHidden();
-    await expect(
-      page.getByRole('button', { name: 'Use a different domain', exact: true })
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: "I've removed them — check again", exact: true })
-    ).toBeVisible();
-    // The install action is unavailable while a conflict exists.
-    await expect(page.locator('#install')).toBeHidden();
-    await expect(page.locator('#back-to-choose')).toBeVisible();
-  }
+  else await fullScenarioChecks(scenario)(page);
   if (scenario === 'choose') {
     await expect(page.locator('#install-simple')).toBeDisabled();
     await page.locator('#confirm').check();
@@ -359,6 +328,8 @@ async function auditViewport(
     'choose',
     'full-choose',
     'full-review',
+    'full-adopt-form',
+    'full-adopt',
     'full-conflict',
     'empty',
     'ready',
@@ -628,6 +599,7 @@ async function auditMaintenance(browser: Browser) {
       }),
     },
   });
+  screenshots += await auditTakeoverPanel(page, target, env, values, captureState);
   screenshots += await captureMaintenanceControls(page, target);
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto(target);

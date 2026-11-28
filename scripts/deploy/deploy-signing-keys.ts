@@ -1,5 +1,4 @@
 import * as crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 const ED25519_PKCS8_SEED_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 const ED25519_SPKI_PUBLIC_KEY_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -39,19 +38,4 @@ export function generateDeploySigningKeyPair(): { publicKey: string; privateKey:
     privateKey,
     publicKey: deriveDeploySigningPublicKey(privateKey),
   };
-}
-
-function main(): void {
-  const command = process.argv[2];
-  if (command !== 'derive-public') {
-    throw new Error('Usage: deploy-signing-keys.ts derive-public');
-  }
-
-  process.stdout.write(
-    deriveDeploySigningPublicKey(process.env.DEPLOY_SIGNING_PRIVATE_KEY_INPUT ?? '')
-  );
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main();
 }

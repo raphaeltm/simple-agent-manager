@@ -1,4 +1,3 @@
-import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
 import { guardedFetch } from '@simple-agent-manager/worker-core';
 /**
  * AI proxy passthrough routes — URL-path-based workspace auth.
@@ -206,14 +205,16 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       env: c.env,
       userId,
       format: 'anthropic',
+      // Passthrough goes straight to the provider, never through AI Gateway, so on every
+      // installation SAM's price is the only record of a platform-funded call's spend.
       fallbackInputTokens:
-        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+        upstream.credentialSource === 'platform'
           ? estimateInputTokensFromRequest(body)
           : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
-      estimateMissingUsage:
-        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      directUpstream: true,
+      estimateMissingUsage: upstream.credentialSource === 'platform',
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
@@ -396,14 +397,16 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       env: c.env,
       userId,
       format: 'openai',
+      // Passthrough goes straight to the provider, never through AI Gateway, so on every
+      // installation SAM's price is the only record of a platform-funded call's spend.
       fallbackInputTokens:
-        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+        upstream.credentialSource === 'platform'
           ? estimateInputTokensFromRequest(body)
           : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
-      estimateMissingUsage:
-        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      directUpstream: true,
+      estimateMissingUsage: upstream.credentialSource === 'platform',
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,

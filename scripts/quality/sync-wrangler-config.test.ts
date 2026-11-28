@@ -225,6 +225,19 @@ describe('sync wrangler config', () => {
     );
   });
 
+  it('points the API Worker at the fake AI upstream on staging and never on production', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 'sam');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const staging = getApiWorkerVars({}, outputs, 'staging', 'analytics-dataset', true);
+    expect(staging).toMatchObject({
+      AI_TEST_UPSTREAM_ENABLED: 'true',
+      AI_TEST_UPSTREAM_GATEWAY_PROVIDER: 'custom-sam-test-upstream',
+    });
+    const production = getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true);
+    expect(production).not.toHaveProperty('AI_TEST_UPSTREAM_ENABLED');
+    expect(production).not.toHaveProperty('AI_TEST_UPSTREAM_GATEWAY_PROVIDER');
+  });
+
   it('forwards optional VM boot recovery overrides without requiring defaults as bindings', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const overrides = {

@@ -41,6 +41,11 @@ const IDLE_TIMEOUT_MS = 3000;
  */
 const AGENT_OUTPUT_ROLES = new Set(['assistant', 'thinking', 'tool']);
 
+/** The only rows this surface changes its activity for (see `onMessage` below). */
+function isAgentOutput(msg: ChatMessageResponse): boolean {
+  return AGENT_OUTPUT_ROLES.has(msg.role);
+}
+
 interface UseWorkspaceChatSocketOptions {
   projectId: string;
   sessionId: string;
@@ -126,7 +131,7 @@ export function useWorkspaceChatSocket({
     // newest row. The view's load has finished before the socket opens (the socket waits for
     // its status), and the cursor is taken now, before this socket delivers anything newer.
     onSubscribed: useCallback(() => {
-      void readMessagesAfter(
+      return readMessagesAfter(
         projectId,
         sessionId,
         messagesRef.current,
@@ -164,13 +169,15 @@ export function useWorkspaceChatSocket({
          * Still arms the SHARED verify-before-decay timer rather than a blind
          * decay, so a long tool call cannot flip the UI to idle underneath it.
          */
-        if (AGENT_OUTPUT_ROLES.has(msg.role)) {
+        if (isAgentOutput(msg)) {
           setAgentActivity('responding');
           startVerifyDecayTimer();
         }
       },
       [startVerifyDecayTimer]
     ),
+    // A `system` row must not fence the activity of an in-flight catch-up snapshot.
+    isActivityMessage: isAgentOutput,
     onSessionStopped: useCallback(() => {
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');
@@ -180,10 +187,17 @@ export function useWorkspaceChatSocket({
         catchUpMsgs: ChatMessageResponse[],
         catchUpSession: ChatSessionResponse,
         state?: SessionStateSnapshot | null,
-        toolChanges?: ToolSnapshotChanges
+        toolChanges?: ToolSnapshotChanges,
+        isSnapshotCurrent: (field?: string) => boolean = () => true
       ) => {
-        setSession(catchUpSession);
-        hydrateActivity(state);
+        setSession((latest) => ({
+          ...catchUpSession,
+          ...Object.fromEntries(
+            Object.entries(latest ?? {}).filter(([field]) => !isSnapshotCurrent(field))
+          ),
+        }));
+        if (isSnapshotCurrent('activity')) hydrateActivity(state);
+        const before = new Set(messagesRef.current.map((message) => message.id));
         return mergeRecentWindowOrRefresh(
           projectId,
           sessionId,
@@ -198,7 +212,11 @@ export function useWorkspaceChatSocket({
           toolRevision.current = merged.toolChanges?.revision ?? toolRevision.current;
           setMessages((prev) =>
             merged.toolChanges?.resetRequired
-              ? merged.messages
+              ? mergeMessages(
+                  merged.messages,
+                  prev.filter((message) => !before.has(message.id)),
+                  'append'
+                )
               : mergeMessages(prev, merged.messages, 'replace')
           );
         });

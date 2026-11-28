@@ -41,10 +41,37 @@ export function messageCommentsQueryOptions(
   projectId: string,
   sessionId: string
 ) {
+  const queryKey = messageCommentQueryKeys.session(queryScope, projectId, sessionId);
   return queryOptions({
-    queryKey: messageCommentQueryKeys.session(queryScope, projectId, sessionId),
-    queryFn: async ({ signal }): Promise<MessageCommentThread[]> =>
-      (await listMessageComments(projectId, sessionId, { signal })).comments,
+    queryKey,
+    queryFn: async ({ signal, client }): Promise<MessageCommentThread[]> => {
+      const before = new Map(
+        (client.getQueryData<MessageCommentThread[]>(queryKey) ?? []).map((thread) => [
+          thread.id,
+          thread,
+        ])
+      );
+      const response = (await listMessageComments(projectId, sessionId, { signal })).comments;
+      const changed = new Map(
+        (client.getQueryData<MessageCommentThread[]>(queryKey) ?? [])
+          .filter((thread) => before.get(thread.id) !== thread)
+          .map((thread) => [thread.id, thread])
+      );
+      const byClientId = new Map(
+        [...changed.values()]
+          .filter((thread) => thread.clientId)
+          .map((thread) => [thread.clientId, thread])
+      );
+      const merged = response.map((thread) => {
+        const live =
+          changed.get(thread.id) ?? (thread.clientId ? byClientId.get(thread.clientId) : undefined);
+        if (!live) return thread;
+        changed.delete(live.id);
+        // Retire optimistic identities when the same mutation has a canonical server id.
+        return live.id === thread.id ? live : { ...live, id: thread.id };
+      });
+      return [...merged, ...changed.values()].sort(compareMessageCommentThreads);
+    },
   });
 }
 

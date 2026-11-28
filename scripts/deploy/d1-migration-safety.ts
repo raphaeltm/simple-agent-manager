@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { D1_MIGRATION_ALIAS_REPAIRS } from './d1-migration-aliases.js';
 import {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   DEFAULT_D1_MIGRATION_CHURNING_TABLES,
 } from './d1-migration-churning-tables.js';
-import { executeD1VerificationRead } from './d1-migration-read-retry.js';
 import {
   MigrationSafetyError,
   parseD1Rows,
@@ -15,13 +15,13 @@ import {
   quoteSqlIdentifier,
   quoteSqlLiteral,
 } from './d1-migration-io.js';
-
-export { MigrationSafetyError, parseWranglerJsonOutput } from './d1-migration-io.js';
+import { executeD1VerificationRead } from './d1-migration-read-retry.js';
 
 export {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   DEFAULT_D1_MIGRATION_CHURNING_TABLES,
 } from './d1-migration-churning-tables.js';
+export { MigrationSafetyError, parseWranglerJsonOutput } from './d1-migration-io.js';
 
 export interface D1DatabaseTarget {
   binding: string;
@@ -66,23 +66,6 @@ const APPS_API_DIR = resolve(import.meta.dirname, '../../apps/api');
 const WRANGLER_COMMAND = 'pnpm';
 const D1_MIGRATIONS_TABLE = 'd1_migrations';
 
-interface D1MigrationAliasRepair {
-  binding: string;
-  table: string;
-  legacyName: string;
-  currentName: string;
-  requiredColumns: readonly string[];
-}
-
-const D1_MIGRATION_ALIAS_REPAIRS: readonly D1MigrationAliasRepair[] = [
-  {
-    binding: 'DATABASE',
-    table: 'workspaces',
-    legacyName: '0157_workspace_eviction_fencing.sql',
-    currentName: '0164_workspace_eviction_fencing.sql',
-    requiredColumns: ['eviction_generation', 'eviction_finalized_at', 'stop_runtime_confirmed_at'],
-  },
-] as const;
 const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
 
 const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);

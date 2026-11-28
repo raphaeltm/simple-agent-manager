@@ -46,6 +46,8 @@ const commentStorage = await import('../../src/do/comments');
 const { ProjectData } = await import('../../src/do/index');
 
 interface MockWebSocket {
+  readyState: number;
+  deserializeAttachment: () => unknown;
   send: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   tags: string[];
@@ -55,6 +57,8 @@ interface MockWebSocket {
 function createMockWebSocket(tags: string[] = []): MockWebSocket {
   const sent: string[] = [];
   return {
+    readyState: WebSocket.OPEN,
+    deserializeAttachment: () => null,
     send: vi.fn((data: string) => sent.push(data)),
     close: vi.fn(),
     tags,

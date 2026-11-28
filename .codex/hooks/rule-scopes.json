@@ -350,6 +350,11 @@
           "pattern": "apps/api/**",
           "regex": "^apps\\/api\\/.*$",
           "literal": 9
+        },
+        {
+          "pattern": "scripts/deploy/installation-keys.ts",
+          "regex": "^scripts\\/deploy\\/installation-keys\\.ts(?:\\/.*)?$",
+          "literal": 35
         }
       ]
     },

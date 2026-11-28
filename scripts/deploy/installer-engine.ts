@@ -4,6 +4,14 @@ import { join, resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 import { AGENT_EMAIL_MARKER_FILE } from './configure-agent-email.js';
+import {
+  deployedAgentEmail,
+  keepAdoptedDeployment,
+  refuseForcedSetup,
+  refuseRollback,
+  refuseShadowedSettings,
+  refuseUnopenableState,
+} from './installer-engine-adoption.js';
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   commandLabel,
@@ -22,18 +30,20 @@ import {
   validateEngineConfig,
 } from './installer-engine-contract.js';
 import { deployEngineApi } from './installer-engine-deploy.js';
+import { applyInfrastructure, ensureInstallationKeys } from './installer-engine-keys.js';
 import { vmAgentPrebuiltKey } from './installer-engine-prebuilt.js';
 import { prebuiltSteps } from './installer-engine-prebuilt-steps.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
+import { prepareStateBackend } from './installer-engine-state.js';
+import { previewExcludeArgs } from './retire-key-resources.js';
 export * from './installer-engine-contract.js';
-export async function runInstallerEngine(
-  input: unknown,
-  options: EngineOptions
-): Promise<EngineCheckpoint> {
-  const c = validateEngineConfig(input);
-  const fingerprint = engineFingerprint(c);
-  const state = options.checkpoint ?? {
+/** The checkpoint to resume from, or a new one; a checkpoint for other inputs is refused. */
+function startingCheckpoint(
+  checkpoint: EngineCheckpoint | undefined,
+  fingerprint: string
+): EngineCheckpoint {
+  const state = checkpoint ?? {
     schemaVersion: 1,
     fingerprint,
     completed: [],
@@ -46,6 +56,14 @@ export async function runInstallerEngine(
   ) {
     throw new Error('Checkpoint does not match approved installation inputs');
   }
+  return state;
+}
+export async function runInstallerEngine(
+  input: unknown,
+  options: EngineOptions
+): Promise<EngineCheckpoint> {
+  const c = validateEngineConfig(input);
+  const state = startingCheckpoint(options.checkpoint, engineFingerprint(c));
   const baseRunner = options.runner ?? processRunner;
   const timings = (state.timings ??= { phases: {}, commands: [] });
   const runner: EngineRunner = {
@@ -70,7 +88,8 @@ export async function runInstallerEngine(
   const prefix = c.prefix;
   if (!prefix) throw new Error('Resolved installation prefix missing');
   const bucket = `${prefix}-${stack}-assets`;
-  const stateBucket = c.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`;
+  const stateBucket =
+    c.stateBucket ?? c.adoption?.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`;
   const env: NodeJS.ProcessEnv = {
     ...options.environment,
     BASE_DOMAIN: c.baseDomain,
@@ -106,7 +125,13 @@ export async function runInstallerEngine(
   mkdirSync(join(root, '.wrangler', 'installer-engine'), { recursive: true, mode: 0o700 });
   let operation = 'phase-validation';
   let goVersion = '';
-  const execute = (executable: string, args: string[], cwd = root, discardOutput = false) => {
+  const execute = (
+    executable: string,
+    args: string[],
+    cwd = root,
+    discardOutput = false,
+    privateOutput = false
+  ) => {
     operation =
       executable === 'pulumi'
         ? `pulumi.${args[0]}`
@@ -120,6 +145,7 @@ export async function runInstallerEngine(
         env,
         timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
         discardOutput,
+        privateOutput,
       }
     );
   };
@@ -129,6 +155,23 @@ export async function runInstallerEngine(
   const script = (name: string, ...args: string[]) =>
     execute('bash', [`scripts/deploy/${name}`, ...args]);
   const pulumi = (...args: string[]) => execute('pulumi', args, join(root, 'infra'));
+  /**
+   * `pulumi preview --json` prints resource state, and a RandomId's `id` in that state is a raw
+   * key. No environment variable holds it, so a failed preview must report no output at all.
+   */
+  const previewJson = (...flags: string[]) =>
+    execute('pulumi', ['preview', ...flags, '--json'], join(root, 'infra'), false, true);
+  /** URNs only: never `pulumi stack export`, whose RandomId ids are raw keys. */
+  const stackUrns = async () =>
+    (
+      await execute(
+        'bash',
+        [join(root, 'scripts/deploy/pulumi-stack-urns.sh')],
+        join(root, 'infra')
+      )
+    )
+      .split('\n')
+      .filter(Boolean);
   const wrangler = (app: string, ...args: string[]) =>
     pnpm('--filter', `@simple-agent-manager/${app}`, 'exec', 'wrangler', ...args);
   const request = (url: string, init?: RequestInit) =>
@@ -269,59 +312,61 @@ export async function runInstallerEngine(
     }
     await pulumi('config', 'set', 'workersDevSubdomain', workersDevSubdomain);
   };
-  await phase('state-backend', async () => {
-    const bucketResponse = await request(
-      `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/r2/buckets/${stateBucket}`,
-      {
-        headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
-      }
-    );
-    if (bucketResponse.status === 404) await wrangler('api', 'r2', 'bucket', 'create', stateBucket);
-    else if (!bucketResponse.ok) throw new Error('State bucket inspection failed');
-    if (c.profile === 'legacy-ci')
-      await pnpm('exec', 'tsx', 'scripts/deploy/installer-engine-ci-s3.ts');
-    await execute('pulumi', [
-      'login',
-      `s3://${stateBucket}?endpoint=https://${c.accountId}.r2.cloudflarestorage.com&region=auto`,
-    ]);
-    const stackData: unknown = JSON.parse(await pulumi('stack', 'ls', '--json'));
-    if (
-      !Array.isArray(stackData) ||
-      stackData.some(
-        (entry: unknown) =>
-          !entry ||
-          typeof entry !== 'object' ||
-          typeof (entry as { name?: unknown }).name !== 'string'
-      )
-    )
-      throw new Error('Invalid Pulumi stack listing');
-    const stacks = stackData as Array<{ name: string }>;
-    if (stacks.some((entry) => entry.name === stack || entry.name.endsWith(`/${stack}`)))
-      await pulumi('stack', 'select', stack);
-    else await pulumi('stack', 'init', stack);
-    await configureWorkersDev();
-    for (const [key, value] of Object.entries({
-      cloudflareAccountId: c.accountId,
-      cloudflareZoneId: c.zoneId,
-      baseDomain: c.baseDomain,
-      zoneName: c.zoneName,
-      resourcePrefix: prefix,
-    })) {
-      await pulumi('config', 'set', key, value);
-    }
-  });
+  await phase('state-backend', () =>
+    prepareStateBackend({
+      config: c,
+      apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
+      stateBucket,
+      stack,
+      prefix,
+      token: String(env.CF_API_TOKEN),
+      adopt: !!c.adoption,
+      request,
+      createBucket: () => wrangler('api', 'r2', 'bucket', 'create', stateBucket),
+      prepareLegacyCiBackend: () => pnpm('exec', 'tsx', 'scripts/deploy/installer-engine-ci-s3.ts'),
+      login: (url) => execute('pulumi', ['login', url]),
+      pulumi,
+      configureWorkersDev,
+    })
+  );
   if (c.dryRun) {
-    await phase('infrastructure-preview', () => pulumi('preview', '--diff'));
+    // No --diff: a diff that deletes or replaces a random.RandomId prints its id, the raw key.
+    // Key resources still in state are excluded: their planned deletion would refuse the
+    // preview, and its oldState would carry a RandomId's raw id.
+    await phase('infrastructure-preview', async () =>
+      pulumi('preview', ...previewExcludeArgs(await stackUrns()))
+    );
     state.status = 'completed';
     delete state.activePhase;
     await options.save(state);
     return state;
   }
+  const cloudflareAccess = {
+    request,
+    apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
+    accountId: c.accountId,
+    token: String(env.CF_API_TOKEN),
+  };
+  if (c.adoption?.takeover)
+    await phase('adoption-preflight', async () => {
+      await refuseUnopenableState(() =>
+        execute('pulumi', ['stack'], join(root, 'infra'), true, true)
+      );
+      await refuseForcedSetup({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
+      await refuseShadowedSettings({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` });
+      await refuseRollback({
+        ...cloudflareAccess,
+        root,
+        stackOutputs: () => pulumi('stack', 'output', '--json'),
+      });
+    });
   // Installation outputs outlive the container through the state bucket, which exists
   // from here on and persists across installations of this account and domain.
+  // Not on a takeover: the cache lives in the state bucket, and a takeover that is refused must
+  // leave that bucket exactly as it found it. The first update after it fills the cache.
   const cached = await openEngineBuildCache({
     options,
-    enabled: c.profile !== 'legacy-ci',
+    enabled: c.profile !== 'legacy-ci' && !c.adoption?.takeover,
     accountId: c.accountId,
     bucket: stateBucket,
     root,
@@ -387,14 +432,19 @@ export async function runInstallerEngine(
       execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
     )
   );
-  await phase('infrastructure', async () => {
-    await execute(
-      'bash',
-      [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')],
-      join(root, 'infra')
-    );
-    await pulumi('up', '--yes', '--skip-preview');
-  });
+  const apiWorker = `${prefix}-api-${stack}`;
+  await phase('infrastructure', () =>
+    applyInfrastructure({
+      takeover: !!c.adoption?.takeover,
+      listUrns: stackUrns,
+      previewJson,
+      refresh: () =>
+        execute('bash', [join(root, 'scripts/deploy/pulumi-refresh-safe.sh')], join(root, 'infra')),
+      pulumiQuiet: (args) => execute('pulumi', args, join(root, 'infra'), true),
+      up: () => pulumi('up', '--yes', '--skip-preview'),
+      worker: { ...cloudflareAccess, worker: apiWorker },
+    })
+  );
   let outputs: Record<string, unknown> = {};
   await phase('resolve-infrastructure', async () => {
     const parsed: unknown = JSON.parse(await pulumi('stack', 'output', '--json'));
@@ -411,6 +461,12 @@ export async function runInstallerEngine(
   if (output('r2Name') !== bucket || output('cloudflareAccountId') !== c.accountId)
     throw new Error('Infrastructure identity mismatch');
   await phase('configure-services', async () => {
+    if (c.adoption)
+      await keepAdoptedDeployment(env, {
+        ...cloudflareAccess,
+        worker: apiWorker,
+        root,
+      });
     Object.assign(env, {
       D1_DATABASE_IDS: `${output('d1DatabaseId')} ${output('observabilityD1DatabaseId')}`,
       PAGES_PROJECT: output('pagesName'),
@@ -418,11 +474,19 @@ export async function runInstallerEngine(
     });
     if (c.profile === 'legacy-ci')
       await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
-    else await prepareInstallationEmail();
+    else if (!c.adoption) await prepareInstallationEmail();
+    else if (await deployedAgentEmail({ ...cloudflareAccess, worker: `${prefix}-api-${stack}` })) {
+      // An adopted deployment keeps the email it has, and this step creates nothing for it.
+      env.AGENT_EMAIL_EXISTING_ONLY = 'true';
+      await prepareInstallationEmail();
+    } else rmSync(join(root, '.wrangler', AGENT_EMAIL_MARKER_FILE), { force: true });
     await sync();
     await script('configure-r2-cors.sh');
     await script('configure-ai-gateway.sh');
-    await script('configure-d1-read-replication.sh');
+    // An adopted deployment keeps the read-replication mode it runs with. Its owner may have set
+    // D1_READ_REPLICATION_MODE=disabled in the fork's GitHub Environment, which this job cannot
+    // see, and the script's default (auto) would change both databases.
+    if (!c.adoption) await script('configure-d1-read-replication.sh');
     await script('verify-pages-domain.sh');
   });
   await phase('build', async () => {
@@ -465,6 +529,16 @@ export async function runInstallerEngine(
       ]);
       await execute('sudo', ['systemctl', 'restart', 'docker']);
     });
+  // Installation keys go straight into the API Worker and are never read back. Installer runs may
+  // create the ones it lacks (ENCRYPTION_KEY only for a brand-new installation); CI deploys and
+  // adoptions of an existing ENCRYPTION_KEY only require them.
+  const installationKeys = () =>
+    ensureInstallationKeys({
+      mayCreate: c.profile !== 'legacy-ci',
+      freshInstallation: !c.adoption,
+      worker: { ...cloudflareAccess, worker: apiWorker },
+      databaseId: output('d1DatabaseId'),
+    });
   await phase('bootstrap-api-tail', async () => {
     const images = await imageImport;
     if (Object.keys(images).length) {
@@ -472,11 +546,17 @@ export async function runInstallerEngine(
       await sync();
     }
     const firstDeploy = existsSync(join(root, '.wrangler/api-worker-first-deploy'));
-    if (firstDeploy) await deployApi();
+    if (firstDeploy) {
+      await deployApi();
+      // The Worker exists from here on: give it its keys at once rather than after the Tail
+      // Worker, so it serves as little as possible without them.
+      await installationKeys();
+    }
     await wrangler('tail-worker', 'deploy', '--env', c.environment);
     if (existsSync(join(root, '.wrangler/tail-worker-first-deploy'))) await sync();
     if (firstDeploy) await deployApi();
   });
+  await phase('installation-keys', installationKeys);
   await phase('publish-application', async () => {
     await wrangler(
       'web',
@@ -502,7 +582,11 @@ export async function runInstallerEngine(
             c.profile === 'legacy-ci'
               ? options.environment.CF_API_TOKEN
               : options.environment.CF_RUNTIME_API_TOKEN,
-          BOOTSTRAP_OWNER_EMAIL: c.ownerEmail,
+          // An adopted deployment already has its administrators; an owner binding would lock
+          // out every user but one (bootstrap-owner.ts). Empty leaves any existing value alone.
+          BOOTSTRAP_OWNER_EMAIL: c.adoption ? '' : c.ownerEmail,
+          // An unset agent sign-in trust deletes the Worker's: an adopted deployment keeps its own.
+          ...(c.adoption ? { AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: 'true' } : {}),
         },
       }
     );
@@ -538,7 +622,7 @@ export async function runInstallerEngine(
           apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
           accountId: c.accountId,
           token: String(env.CF_API_TOKEN),
-          worker: `${prefix}-api-${stack}`,
+          worker: apiWorker,
           pages: output('pagesName'),
           domain: c.baseDomain,
           commit: c.sourceCommit,
@@ -551,7 +635,8 @@ export async function runInstallerEngine(
     }
     throw new Error('Health verification failed');
   });
-  if (options.saveResult && c.profile !== 'legacy-ci')
+  // An adopted deployment has an owner and closed setup: there is no setup token to hand over.
+  if (options.saveResult && c.profile !== 'legacy-ci' && !c.adoption)
     await phase('owner-handoff', async () => {
       const generated = TOML.parse(
         readFileSync(join(root, 'apps/api/wrangler.toml'), 'utf8')

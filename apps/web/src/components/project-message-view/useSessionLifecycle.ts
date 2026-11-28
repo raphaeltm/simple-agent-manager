@@ -1,6 +1,7 @@
 import type { ChatMessageAppend, PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { SnapshotCurrent } from '../../hooks/chat-websocket-types';
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
@@ -118,25 +119,29 @@ export function useSessionLifecycle(
   const { hydrateWakeProgress } = wake;
 
   const hydrateState = useCallback(
-    (s: SessionStateSnapshot | null | undefined) => {
+    (s: SessionStateSnapshot | null | undefined, isCurrent: SnapshotCurrent = () => true) => {
       if (!s) return;
       // Wake phase is folded in first so the banner has a phase to render in the
       // same commit that flips activity to 'recovering'.
-      hydrateWakeProgress(s);
-      if (isWorkingActivity(s.activity)) {
-        setAgentActivity(s.activity);
-        setPromptStartedAt(s.promptStartedAt ?? null);
-        startVerifyDecayTimer();
-      } else if (s.recoveryStatus === 'waking') {
-        setAgentActivity('recovering');
-        sleepingWakePendingRef.current = true;
-      } else {
-        clearActivity();
-        stopVerifyDecayTimer();
+      if (isCurrent('wake')) hydrateWakeProgress(s);
+      if (isCurrent('activity')) {
+        if (isWorkingActivity(s.activity)) {
+          setAgentActivity(s.activity);
+          setPromptStartedAt(s.promptStartedAt ?? null);
+          startVerifyDecayTimer();
+        } else if (isCurrent('wake') && s.recoveryStatus === 'waking') {
+          setAgentActivity('recovering');
+          sleepingWakePendingRef.current = true;
+        } else {
+          clearActivity();
+          stopVerifyDecayTimer();
+        }
       }
-      hydratePlan(s);
+      if (isCurrent('plan')) setCurrentPlan(s.currentPlan ?? null);
+      if (isCurrent('steering') && typeof s.steeringSupported === 'boolean')
+        setSteeringSupported(s.steeringSupported);
     },
-    [clearActivity, hydratePlan, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
+    [clearActivity, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
   );
 
   const {

@@ -20,9 +20,14 @@ export interface AiProxyPorts {
   /** Admin setting `performance.externalReadTimeoutMs`, used for AI Gateway API reads. */
   externalReadTimeoutMs(): Promise<number>;
   /**
-   * Admin setting `aiProxy.perUserMonthlyCostCeilingUsd`: the most any one user may spend on SAM-priced
-   * AI calls in a UTC month, in whole USD; 0 means no ceiling. Superadmin-only. Read only where
-   * SAM meters spend itself (`hasLocalAiCostMetering`), so AI Gateway installs never pay for it.
+   * Admin setting `aiProxy.perUserMonthlyCostCeilingUsd`: the most any one user may spend on
+   * platform-funded AI calls in a UTC month, in whole USD; 0 means no ceiling. Superadmin-only.
+   * Read on every install (with a gateway it bounds the gateway total plus the recent estimate).
    */
   monthlyCostCeilingUsd(): Promise<number>;
+  /**
+   * Admin setting `aiProxy.costEstimateGatewayLagSeconds`: how far before the gateway total's
+   * read time the catalog estimate keeps counting (ai-cost-estimate.ts). Gateway installs only.
+   */
+  costEstimateGatewayLagSeconds(): Promise<number>;
 }

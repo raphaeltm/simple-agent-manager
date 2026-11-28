@@ -9,111 +9,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Registers a value with GitHub's log masker before anything else can print it (policy
-# 795e72a6, .claude/rules/83-no-secret-readback-in-ci.md). GitHub masks only values it knows,
-# matching line by line: a value read back from Pulumi is unknown to it, and the JSON-escaped
-# form of a multi-line value is one line it would not otherwise match. So every non-blank line
-# and the JSON-escaped form are registered. Outside GitHub Actions nothing is printed, because
-# the command itself carries the value.
-mask_secret_value() {
-  local value="$1"
-  if [[ "${GITHUB_ACTIONS:-}" != "true" || -z "$value" ]]; then
-    return 0
-  fi
-  local line escaped
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    if [[ -n "${line//[[:space:]]/}" ]]; then
-      # The runner decodes %25 in command data, so a literal % must be sent encoded.
-      printf '::add-mask::%s\n' "${line//%/%25}"
-    fi
-  done <<<"$value"
-  escaped="$(printf '%s' "$value" | json_escape_stdin)"
-  escaped="${escaped:1:${#escaped}-2}"
-  if [[ -n "$escaped" && "$escaped" != "$value" ]]; then
-    printf '::add-mask::%s\n' "${escaped//%/%25}"
-  fi
-}
-
-# Prints a Pulumi stack output on stdout, or nothing when it cannot be read, so
-# callers keep their override precedence. A failed read names its cause on
-# stderr. Only Pulumi's stderr is ever shown: its stdout carries the secret.
-read_pulumi_secret() {
-  local output_name="$1"
-  if [ -z "${PULUMI_STACK:-}" ]; then
-    return 0
-  fi
-
-  local stderr_file value="" status=0 step="pulumi stack output $output_name"
-  stderr_file="$(mktemp)"
-  chmod 600 "$stderr_file"
-  if ! (cd infra && pulumi stack select "$PULUMI_STACK" >/dev/null 2>"$stderr_file"); then
-    status=1
-    step="pulumi stack select $PULUMI_STACK"
-  else
-    # Legacy readback, masked by load_pulumi_secret before any other use. Removal is tracked in
-    # tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md and idea 01M7M5PJCY4T3CR715AFKRM74R.
-    # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
-    value="$(cd infra && pulumi stack output "$output_name" --show-secrets 2>"$stderr_file")" || status=$?
-  fi
-
-  if [ "$status" -ne 0 ]; then
-    if grep -qi 'does not have output property' "$stderr_file"; then
-      echo "WARNING: Pulumi stack $PULUMI_STACK has no output named $output_name" >&2
-    fi
-    echo "WARNING: could not read Pulumi output $output_name: '$step' exited with status $status. Last Pulumi stderr lines:" >&2
-    tail -n 20 "$stderr_file" | sed 's/^/  pulumi: /' >&2
-  elif [ -z "$value" ]; then
-    echo "WARNING: Pulumi output $output_name on stack $PULUMI_STACK is empty" >&2
-  else
-    printf '%s\n' "$value"
-  fi
-  rm -f "$stderr_file"
-}
-
-# Pulumi outputs whose read came back empty, named when a required key is missing.
-PULUMI_EMPTY_OUTPUTS=()
-
-# Reads a Pulumi output into the named variable and records an empty result.
-load_pulumi_secret() {
-  local variable_name="$1"
-  local output_name="$2"
-  local value
-  value="$(read_pulumi_secret "$output_name")"
-  mask_secret_value "$value"
-  if [ -z "$value" ]; then
-    PULUMI_EMPTY_OUTPUTS+=("$output_name")
-  fi
-  printf -v "$variable_name" '%s' "$value"
-}
-
-report_empty_pulumi_outputs() {
-  if [ -z "${PULUMI_STACK:-}" ]; then
-    echo "PULUMI_STACK is not set, so no keys were read from Pulumi state." >&2
-  elif [ "${#PULUMI_EMPTY_OUTPUTS[@]}" -gt 0 ]; then
-    echo "Pulumi output reads that came back empty from stack $PULUMI_STACK: ${PULUMI_EMPTY_OUTPUTS[*]}" >&2
-  else
-    echo "No Pulumi output read from stack $PULUMI_STACK came back empty." >&2
-  fi
-}
-
-derive_deploy_signing_public_key() {
-  local private_key_b64="$1"
-
-  DEPLOY_SIGNING_PRIVATE_KEY_INPUT="$private_key_b64" pnpm exec tsx scripts/deploy/deploy-signing-keys.ts derive-public
-}
-
-derive_vapid_public_key_from_raw() {
-  local private_key_b64url="$1"
-  VAPID_PRIVATE_KEY_INPUT="$private_key_b64url" pnpm exec tsx scripts/deploy/vapid-keys.ts derive-public-from-raw
-}
-
-derive_vapid_key_from_pem() {
-  local private_key_pem="$1"
-  local component="$2"
-  VAPID_PRIVATE_KEY_PEM_INPUT="$private_key_pem" pnpm exec tsx scripts/deploy/vapid-keys.ts "$component"
-}
-
 # Cloudflare's bulk secrets API accepts up to 100 create/update/delete operations
 # per request. Keep this configurable so operators can lower the per-request
 # budget if the API or account policy changes.
@@ -178,6 +73,15 @@ set_worker_secret() {
   local secret_value="$2"
   local environment="$3"
   local is_required="${4:-false}"
+
+  # An adopted installation keeps a secret the Worker already holds when this script would only
+  # derive a default for it: the value may be a GitHub-secret override this deploy cannot see
+  # (installer-engine-adoption.ts, PRESERVED_KEY_SECRETS). Installation keys need no such list:
+  # nothing here writes them.
+  if [[ ",${PRESERVE_EXISTING_WORKER_SECRETS:-}," == *",$secret_name,"* ]]; then
+    echo "Keeping existing $secret_name"
+    return 0
+  fi
 
   if [ -z "$secret_value" ]; then
     if [ "$is_required" = "true" ]; then
@@ -282,110 +186,22 @@ fi
 
 ENVIRONMENT="$1"
 
-# Security keys from different sources
-# Priority: GitHub secrets (backwards compat) > Pulumi state (primary) > Generated (legacy)
-PULUMI_ENCRYPTION_KEY="${PULUMI_ENCRYPTION_KEY:-}"
-PULUMI_JWT_PRIVATE_KEY="${PULUMI_JWT_PRIVATE_KEY:-}"
-PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
-PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="${PULUMI_DEPLOY_SIGNING_PRIVATE_KEY:-}"
-PULUMI_PREVIEW_SIGNING_KEY="${PULUMI_PREVIEW_SIGNING_KEY:-}"
-PULUMI_VAPID_PRIVATE_KEY_PEM="${PULUMI_VAPID_PRIVATE_KEY_PEM:-}"
-SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
-SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
-SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
-
-if [[ -n "${PULUMI_STACK:-}" ]]; then
-  echo "Reading Pulumi-managed security keys from stack: $PULUMI_STACK"
-  if [[ -z "$PULUMI_ENCRYPTION_KEY" ]]; then
-    load_pulumi_secret PULUMI_ENCRYPTION_KEY encryptionKey
-  fi
-  if [[ -z "$PULUMI_JWT_PRIVATE_KEY" ]]; then
-    load_pulumi_secret PULUMI_JWT_PRIVATE_KEY jwtPrivateKey
-  fi
-  if [[ -z "$PULUMI_JWT_PUBLIC_KEY" ]]; then
-    load_pulumi_secret PULUMI_JWT_PUBLIC_KEY jwtPublicKey
-  fi
-  if [[ -z "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
-    load_pulumi_secret PULUMI_DEPLOY_SIGNING_PRIVATE_KEY deploySigningPrivateKey
-  fi
-  if [[ -z "$PULUMI_PREVIEW_SIGNING_KEY" ]]; then
-    load_pulumi_secret PULUMI_PREVIEW_SIGNING_KEY previewSigningKey
-  fi
-  if [[ -z "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
-    load_pulumi_secret PULUMI_VAPID_PRIVATE_KEY_PEM vapidPrivateKeyPem
-  fi
-fi
-
 echo "Configuring secrets for environment: $ENVIRONMENT"
 echo ""
 
-# Determine key source with priority:
-# 1. GitHub secrets (backwards compatibility for existing deployments)
-# 2. Pulumi state (primary source, persists automatically)
-if [ -n "$SECRET_ENCRYPTION_KEY" ]; then
-  echo "Using security keys from GitHub Secrets (backwards compatibility)"
-  ENCRYPTION_KEY="$SECRET_ENCRYPTION_KEY"
-  JWT_PRIVATE_KEY="$SECRET_JWT_PRIVATE_KEY"
-  JWT_PUBLIC_KEY="$SECRET_JWT_PUBLIC_KEY"
-elif [ -n "$PULUMI_ENCRYPTION_KEY" ]; then
-  echo "Using security keys from Pulumi state (auto-persisted)"
-  ENCRYPTION_KEY="$PULUMI_ENCRYPTION_KEY"
-  JWT_PRIVATE_KEY="$PULUMI_JWT_PRIVATE_KEY"
-  JWT_PUBLIC_KEY="$PULUMI_JWT_PUBLIC_KEY"
-else
-  echo -e "${RED}ERROR: No security keys available from GitHub Secrets or Pulumi state${NC}" >&2
-  echo "This should not happen - Pulumi should have created the keys." >&2
-  report_empty_pulumi_outputs
-  exit 1
-fi
-
-# Deployment apply signing keys use a separate Ed25519 keypair from JWTs.
-# Existing GitHub secrets remain supported as explicit overrides. Fresh installs
-# use the Pulumi-persisted seed generated with the rest of the platform-owned
-# security material, deriving the public key when configuring Worker secrets.
-if [[ -n "${DEPLOY_SIGNING_PRIVATE_KEY:-}" ]]; then
-  echo "Using deploy signing key from GitHub Secrets (backwards compatibility)"
-  DERIVED_DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
-  if [[ -z "${DEPLOY_SIGNING_PUBLIC_KEY:-}" ]]; then
-    DEPLOY_SIGNING_PUBLIC_KEY="$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY"
-  elif [[ "$DEPLOY_SIGNING_PUBLIC_KEY" != "$DERIVED_DEPLOY_SIGNING_PUBLIC_KEY" ]]; then
-    echo -e "${RED}ERROR: DEPLOY_SIGNING_PUBLIC_KEY does not match DEPLOY_SIGNING_PRIVATE_KEY${NC}" >&2
-    exit 1
-  fi
-elif [[ -n "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
-  echo "Using deploy signing keys from Pulumi state (auto-persisted)"
-  DEPLOY_SIGNING_PRIVATE_KEY="$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY"
-  DEPLOY_SIGNING_PUBLIC_KEY="$(derive_deploy_signing_public_key "$DEPLOY_SIGNING_PRIVATE_KEY")"
-else
-  echo -e "${RED}ERROR: No deploy signing key available from GitHub Secrets or Pulumi state${NC}" >&2
-  echo "This should not happen - Pulumi should have created the key." >&2
-  report_empty_pulumi_outputs
+# Installation keys (ENCRYPTION_KEY, the JWT, VAPID and deploy signing pairs, PREVIEW_SIGNING_KEY,
+# and the optional BETTER_AUTH_SECRET / CREDENTIAL_ENCRYPTION_KEY) are never read, generated or
+# written here: they live only in the API Worker's secrets, created once by the installer or by
+# `scripts/deploy/installation-keys.ts create` on a machine the operator owns (policy 795e72a6).
+# A deploy only checks, by name, that the Worker has them, and fails without creating any.
+echo "Checking the API Worker's installation keys (names only)..."
+if ! pnpm --filter @simple-agent-manager/api exec wrangler secret list --env "$ENVIRONMENT" --format json |
+  pnpm exec tsx scripts/deploy/installation-keys.ts check-listing "$ENVIRONMENT"; then
+  echo -e "${RED}ERROR: the API Worker is missing installation keys, or its secrets could not be listed; nothing was changed${NC}" >&2
   exit 1
 fi
 echo ""
 
-# Web Push VAPID uses a Pulumi-persisted P-256 PKCS#8 key on fresh installs.
-# Raw base64url values remain supported as an explicit operator override.
-if [[ -n "${VAPID_PRIVATE_KEY:-}" ]]; then
-  echo "Using Web Push VAPID key from explicit environment override"
-  DERIVED_VAPID_PUBLIC_KEY="$(derive_vapid_public_key_from_raw "$VAPID_PRIVATE_KEY")"
-  if [[ -z "${VAPID_PUBLIC_KEY:-}" ]]; then
-    VAPID_PUBLIC_KEY="$DERIVED_VAPID_PUBLIC_KEY"
-  elif [[ "$VAPID_PUBLIC_KEY" != "$DERIVED_VAPID_PUBLIC_KEY" ]]; then
-    echo -e "${RED}ERROR: VAPID_PUBLIC_KEY does not match VAPID_PRIVATE_KEY${NC}" >&2
-    exit 1
-  fi
-elif [[ -n "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
-  echo "Using Web Push VAPID key from Pulumi state (auto-persisted)"
-  VAPID_PRIVATE_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-private-from-pem)"
-  mask_secret_value "$VAPID_PRIVATE_KEY"
-  VAPID_PUBLIC_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-public-from-pem)"
-else
-  echo -e "${RED}ERROR: No Web Push VAPID key available from an explicit override or Pulumi state${NC}" >&2
-  echo "This should not happen - Pulumi should have created the key." >&2
-  report_empty_pulumi_outputs
-  exit 1
-fi
 if [[ -z "${VAPID_SUBJECT:-}" ]]; then
   if [[ -z "${BASE_DOMAIN:-}" ]]; then
     echo -e "${RED}ERROR: BASE_DOMAIN is required to derive VAPID_SUBJECT${NC}" >&2
@@ -393,25 +209,14 @@ if [[ -z "${VAPID_SUBJECT:-}" ]]; then
   fi
   VAPID_SUBJECT="https://app.${BASE_DOMAIN}"
 fi
-echo ""
 
 # Track if any required secrets fail
 FAILED=false
 
-# Configure required security secrets
-set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "PREVIEW_SIGNING_KEY" "$PULUMI_PREVIEW_SIGNING_KEY" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "VAPID_PRIVATE_KEY" "$VAPID_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "VAPID_PUBLIC_KEY" "$VAPID_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
+# Web Push contact (not a key): derived from BASE_DOMAIN unless overridden.
 set_worker_secret "VAPID_SUBJECT" "$VAPID_SUBJECT" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure purpose-specific secret overrides.
-# BETTER_AUTH_SECRET and CREDENTIAL_ENCRYPTION_KEY fall back to ENCRYPTION_KEY.
 # GITHUB_WEBHOOK_SECRET is optional. If absent, admins can set it in first-run setup/admin UI.
-set_worker_secret "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET:-}" "$ENVIRONMENT" "false"
-set_worker_secret "CREDENTIAL_ENCRYPTION_KEY" "${CREDENTIAL_ENCRYPTION_KEY:-}" "$ENVIRONMENT" "false"
 # GitHub Actions secret names cannot start with GITHUB_, so CI passes GH_WEBHOOK_SECRET.
 set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "false"
 
@@ -421,11 +226,6 @@ set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "BOOTSTRAP_OWNER_EMAIL" "${BOOTSTRAP_OWNER_EMAIL:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CF_AIG_TOKEN" "${CF_AIG_TOKEN:-}" "$ENVIRONMENT" "false"
-
-# Configure deployment apply signing keys. Deployment nodes only apply releases
-# signed by this keypair; missing keys make the deploy-release callback unusable.
-set_worker_secret "DEPLOY_SIGNING_PRIVATE_KEY" "${DEPLOY_SIGNING_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "DEPLOY_SIGNING_PUBLIC_KEY" "${DEPLOY_SIGNING_PUBLIC_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
 
 # Optional: use a narrower Cloudflare token/account for managed Containers Registry
 # devcontainer cache credentials. Falls back to CF_API_TOKEN/CF_ACCOUNT_ID when unset.

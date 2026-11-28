@@ -10,6 +10,11 @@ export {
   resolveUpstreamAuth,
   type UpstreamAuth,
 } from './ai-billing';
+export {
+  buildCostEstimateWrite,
+  type CostEstimateWrite,
+  parseGatewayMonthlyCost,
+} from './ai-cost-estimate';
 export { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 export {
   aiGatewayOnlyHeaders,
@@ -36,6 +41,7 @@ export {
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
 export { getLocalUsageBreakdown } from './ai-model-usage';
 export {
+  getGatewayDirectMonthlySpendUsd,
   getLocalMonthlyAiCostUsd,
   type MonthlyCostCapCheck,
   monthlyCostCapMessage,
@@ -52,6 +58,19 @@ export {
   readSafeGatewayErrorDiagnostic,
   WorkersAIGatewayError,
 } from './ai-proxy-shared';
+export {
+  AI_TEST_UPSTREAM_COST_HEADER,
+  AI_TEST_UPSTREAM_GATE_HEADER,
+  AI_TEST_UPSTREAM_GATE_VALUE,
+  AI_TEST_UPSTREAM_MAX_COST_USD,
+} from './ai-test-upstream-contract';
+export {
+  buildFakeUpstreamResponse,
+  FAKE_UPSTREAM_INPUT_TOKENS,
+  FAKE_UPSTREAM_TEXT,
+  type FakeUsage,
+  fakeUsageForCost,
+} from './ai-test-upstream-responses';
 export {
   type AiProviderUsageAttribution,
   checkAiUsageGate,

@@ -16,7 +16,6 @@
  */
 import {
   findPricedModel,
-  hasLocalAiCostMetering,
   type MeasuredTokenUsage,
   type MonthlyCostCapCheck,
 } from '@simple-agent-manager/ai-proxy';
@@ -214,11 +213,11 @@ async function enforcePassthroughFunding(
   options: PrepareProxyOptions
 ): Promise<Response | null> {
   const platformBilled = upstream.credentialSource === 'platform';
-  if (
-    platformBilled &&
-    hasLocalAiCostMetering(c.env) &&
-    !hasCanonicalCatalogPrice(upstream, modelId)
-  ) {
+  // Passthrough goes straight to the provider on every installation, never through AI Gateway, so
+  // SAM's catalog price is the only record of a platform-funded call's spend. An unpriced call
+  // would count $0 against the monthly cap and the administrator ceiling, with or without a
+  // gateway, so it is refused everywhere (idea 01M8BX1YRVN5JQ8Y2JSQB7F0QM).
+  if (platformBilled && !hasCanonicalCatalogPrice(upstream, modelId)) {
     const message =
       'Model and upstream endpoint must match a catalog-priced provider to use an installation-funded credential.';
     return options.dialect === 'anthropic'

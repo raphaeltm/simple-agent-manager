@@ -21,6 +21,7 @@ const viewport = vi.hoisted(() => ({ isMobile: false }));
 vi.mock('../../../src/hooks/useIsMobile', () => ({ useIsMobile: () => viewport.isMobile }));
 
 const socket = vi.hoisted(() => ({
+  onReconnected: null as (() => Promise<void>) | null,
   onSessionEvent: null as
     ((event: { type: string; payload: Record<string, unknown> }) => void) | null,
 }));
@@ -32,10 +33,13 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
   useProjectWebSocket: ({
     onSessionEvent,
+    onReconnected,
   }: {
     onSessionEvent?: (event: { type: string; payload: Record<string, unknown> }) => void;
+    onReconnected?: () => Promise<void>;
   }) => {
     socket.onSessionEvent = onSessionEvent ?? null;
+    socket.onReconnected = onReconnected ?? null;
     return { connectionState: 'connected' };
   },
 }));
@@ -447,6 +451,45 @@ describe('Project Overview', () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('refreshes after an initial snapshot held across the first subscription', async () => {
+    const fetchOriginal = globalThis.fetch;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(`/api/projects/${PROJECT_ID}/overview`)) {
+          reads++;
+          if (reads === 1) {
+            const stale = overview([EXISTING]);
+            await held;
+            return new Response(JSON.stringify(stale), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        return fetchOriginal(input, init);
+      })
+    );
+    renderOverview();
+    await waitFor(() => expect(reads).toBe(1));
+    act(() => {
+      void socket.onReconnected?.();
+    });
+    expect(reads).toBe(1);
+    overviewBody = overview([
+      { ...EXISTING, sessionId: 'after-admission', topic: 'Fresh after admission' },
+    ]);
+    await act(async () => {
+      release();
+    });
+    expect(await screen.findByText('Fresh after admission')).toBeInTheDocument();
+    expect(reads).toBe(2);
   });
 
   it('shows what is running from the aggregated read, each row linking to its chat', async () => {
