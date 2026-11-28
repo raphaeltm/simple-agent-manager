@@ -13,7 +13,10 @@ afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
 });
-function setup(statuses: number[]) {
+function setup(
+  statuses: number[],
+  later: { claim?: number[]; landing?: number[] } = {}
+) {
   vi.stubEnv('INSTALLER_ENVIRONMENT', 'staging');
   vi.stubEnv('CLOUDFLARE_API_TOKEN', 'synthetic-deploy-token');
   vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'a'.repeat(32));
@@ -24,17 +27,23 @@ function setup(statuses: number[]) {
     return 0;
   });
   let rootRequests = 0;
+  const claims = [...(later.claim ?? [])];
+  const landings = [...(later.landing ?? [])];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string, init?: RequestInit) => {
       if (input.endsWith('/health')) return Response.json({ ok: true, kind: 'sam-maintenance' });
-      if (input.endsWith('/claim'))
+      if (input.endsWith('/claim')) {
+        const status = claims.shift() ?? 200;
         return new Response(null, {
-          status: 200,
-          headers: { 'set-cookie': '__Host-test=synthetic; Path=/' },
+          status,
+          headers: status === 200 ? { 'set-cookie': '__Host-test=synthetic; Path=/' } : {},
         });
-      if (init?.headers && 'Cookie' in init.headers)
-        return new Response('Ownership handoff verified.');
+      }
+      if (init?.headers && 'Cookie' in init.headers) {
+        const status = landings.shift() ?? 200;
+        return new Response(status === 200 ? 'Ownership handoff verified.' : '', { status });
+      }
       return new Response('', { status: statuses[Math.min(rootRequests++, statuses.length - 1)] });
     })
   );
@@ -61,6 +70,32 @@ describe('bounded staging bootstrap verification', () => {
     const count = setup([404]);
     await expect(import('../scripts/staging-smoke')).rejects.toThrow('propagation timed out');
     expect(count()).toBe(12);
+    expect(mocks.cloudflare).toHaveBeenCalledOnce();
+  });
+  it('retries a claim and a landing that reach an edge not yet serving the Worker', async () => {
+    setup([401], { claim: [404, 503], landing: [404] });
+    await import('../scripts/staging-smoke');
+    const requested = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(requested.filter((input) => input.endsWith('/claim'))).toHaveLength(3);
+    expect(mocks.cloudflare).toHaveBeenCalledOnce();
+  });
+  it.each([401, 403, 500])(
+    'fails at once on a refused claim (%s) and reports the status',
+    async (status) => {
+      setup([401], { claim: [status, 200] });
+      await expect(import('../scripts/staging-smoke')).rejects.toThrow(
+        `Owner handoff failed; claim=${status}, cookie=false`
+      );
+      const requested = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+      expect(requested.filter((input) => input.endsWith('/claim'))).toHaveLength(1);
+      expect(mocks.cloudflare).toHaveBeenCalledOnce();
+    }
+  );
+  it('fails at once when the owner session is rejected, and reports the status', async () => {
+    setup([401], { landing: [401, 200] });
+    await expect(import('../scripts/staging-smoke')).rejects.toThrow(
+      'Authenticated bootstrap landing failed; landing=401'
+    );
     expect(mocks.cloudflare).toHaveBeenCalledOnce();
   });
 });

@@ -1,25 +1,15 @@
 ---
 title: Install SAM with the installer
-description: Install your own SAM in your Cloudflare account from the browser, finish its setup, update it, and host the installer yourself.
+description: Put the SAM installer in your own Cloudflare account with one command, install SAM from the browser, finish its setup, and update it.
 ---
 
-The installer puts a complete SAM in your own Cloudflare account from your browser: you sign in
-with Cloudflare, pick a domain, approve, and about half an hour later your SAM is live. With the
-hosted installer you need no GitHub fork, no terminal and no secrets, but read the note below
-first: for now most people have to host the installer themselves, which takes a terminal and a
-Cloudflare API token. Your agents' machines then run on the cloud account you
-connect in SAM, as with any [self-hosted](/docs/guides/self-hosting/) instance.
+The installer puts a complete SAM in your own Cloudflare account. You run the installer in that
+same account: one command puts it there, and from then on everything happens in your browser. You
+sign in with Cloudflare, pick a domain, approve, and about half an hour later your SAM is live.
+You need no GitHub fork and no list of secrets to copy. Your agents' machines then run on the cloud
+account you connect in SAM, as with any [self-hosted](/docs/guides/self-hosting/) instance.
 
-:::caution[Who can use the hosted installer today]
-At the time of writing, the hosted installer at
-[install.simple-agent-manager.org](https://install.simple-agent-manager.org) signs you in through a
-Cloudflare OAuth client that is still private, and Cloudflare only lets members of the account that
-owns a private client authorize it. Until it is made public, either
-[host the installer yourself](#host-the-installer-yourself) in full mode, where its sign-in works
-for your own account and the steps below are the same, or install with the
-[self-hosting guide](/docs/guides/self-hosting/). The installer also
-still labels a full installation as experimental: it first shipped on 8 November 2026.
-:::
+The installer still labels a full installation as experimental: it first shipped on 8 November 2026.
 
 ## Before you start
 
@@ -28,15 +18,76 @@ still labels a full installation as experimental: it first shipped on 8 November
 - A domain that is active in that Cloudflare account. SAM lives at `app.` and `api.` on it, and
   each workspace gets its own `ws-…` address.
 - An email address for the administrator account.
+- A terminal with Git, Node.js 22.23.4 or newer (or any Node.js 24+) and pnpm 9.15.9, to put the
+  installer in your account. You don't use it again after that.
 
 You don't need GitHub to install. Where your Cloudflare account has Cloudflare Artifacts, SAM can
 keep your projects' code itself; otherwise you connect GitHub after setup.
 
+## Put the installer in your account
+
+1. **Create a Cloudflare API token.** Open this
+   [pre-filled token form](https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%2C%7B%22key%22%3A%22account_settings%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22oauth_client%22%2C%22type%22%3A%22edit%22%7D%5D&accountId=%2A&zoneId=all&name=SAM%20installer)
+   and check that it lists these three account permissions, adding any that is missing:
+
+   | Permission       | Access |
+   | ---------------- | ------ |
+   | Workers Scripts  | Edit   |
+   | Account Settings | Read   |
+   | OAuth Client     | Edit   |
+
+   Limit **Account Resources** to the account you are installing into, give the token a short
+   lifetime, and create it. This token only deploys the installer. The permissions SAM itself
+   needs are approved later, when you sign in with Cloudflare.
+
+2. **Get SAM's source at the latest release.**
+
+   ```sh
+   git clone https://github.com/raphaeltm/simple-agent-manager.git
+   cd simple-agent-manager
+   git checkout "$(git describe --tags --abbrev=0)"
+   pnpm install --frozen-lockfile
+   ```
+
+   The installer installs exactly the version you have checked out, so it has to be a commit that
+   exists in the SAM repository: a release, not local changes.
+
+3. **Deploy the installer.** Supply the token through your shell or secret manager; do not commit
+   it or paste it into an issue or chat. Your account ID is on the account's **Overview** page in
+   the Cloudflare dashboard.
+
+   ```sh
+   export CLOUDFLARE_API_TOKEN
+   export CLOUDFLARE_ACCOUNT_ID
+   pnpm --filter @simple-agent-manager/installer run deploy
+   ```
+
+   When it finishes it prints the installer's address:
+
+   ```txt
+   Installer ready: https://sam-installer-self-hosted.<your-subdomain>.workers.dev
+   ```
+
+The command creates two things in your account (`apps/installer/scripts/deploy.mjs`): a Worker
+named `sam-installer-self-hosted` on your account's `workers.dev` address, and a private Cloudflare
+OAuth client for its **Sign in with Cloudflare** button, whose credentials are stored as secrets on
+that Worker. Cloudflare lets only members of your account
+[authorize a private client](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
+Running the command again updates the installer and keeps both.
+
+If a Cloudflare call is refused, the command stops and names the permission the token is missing
+(`ApiFailure`, `apps/installer/scripts/installer-target.mjs`). It checks that the token can read
+Workers and OAuth clients before it publishes anything; a token that can read OAuth clients but not
+create them fails after the installer Worker is published, and running the command again with a
+corrected token finishes the job. If
+your account has no `workers.dev` address yet, open **Workers & Pages** in the dashboard once to
+create it, or [use your own domain](#use-your-own-domain-for-the-installer).
+
 ## Install
 
-1. Open the installer and select **Set up your cloud**, then **Sign in with Cloudflare**. On
-   Cloudflare, pick the account to install into and approve the permissions. **What will SAM be
-   allowed to do?** lists them first. Your password stays with Cloudflare.
+1. Open the address the command printed and select **Set up your cloud**, then **Sign in with
+   Cloudflare**. On Cloudflare, pick the account to install into and approve the permissions.
+   **What will SAM be allowed to do?** lists them first. Your password stays with Cloudflare.
 2. **Choose your account.** Pick the **Cloudflare account** and the **Cloudflare domain**; the line
    below shows the address SAM will live at. To put SAM under a subdomain such as
    `sam.example.com`, open **Use a subdomain instead** and fill in **Install under**. A subdomain
@@ -62,9 +113,8 @@ keep your projects' code itself; otherwise you connect GitHub after setup.
    there to update SAM.
 5. **Start the build.** **Continue to installation controls →**, then **Install SAM**. The page
    shows each stage as it runs (**Step 3 of 13**, with **Show all stages**) and refreshes itself.
-   It usually takes about 30 minutes; when SAM's latest release has prebuilt parts that match the
-   version being installed, the installation service downloads and checks them instead of building
-   them, which is quicker. You can close the tab and come back. **Stop this build** cancels it.
+   It usually takes about 30 minutes, because your account builds every part of SAM from the
+   source you checked out. You can close the tab and come back. **Stop this build** cancels it.
 
    <img
      src="/images/docs/installer-build-progress-mobile.png"
@@ -149,10 +199,10 @@ through the service.
    passes through the installer, which drops its copy at handoff, and is then kept only as a secret
    of the installation service in your account. A wrong passphrase stops the takeover at its first
    check, before it reads or changes your deployment (`refuseUnopenableState`). The passphrase
-   opens your deploy state, which may still hold copies of your keys, so enter it only at an
-   installer you trust: check the address, or
-   [host the installer yourself](#host-the-installer-yourself). The administrator email on the form
-   is not used to change who administers your SAM; it is only shown on your installation service.
+   opens your deploy state, which may still hold copies of your keys, so enter it only at the
+   installer you [put in your own account](#put-the-installer-in-your-account): check that the
+   address is the one your deploy command printed. The administrator email on the form is not used
+   to change who administers your SAM; it is only shown on your installation service.
 3. Only if your deployment sets `PULUMI_STATE_BUCKET`: enter that bucket's name under **Its
    deploy-state bucket**. Otherwise leave it empty.
 4. **Review** finds the deployment from its API Worker route (`<prefix>-api-<stack>`) and its assets
@@ -264,71 +314,116 @@ installation) is not found under the bucket names the takeover looks for, so it 
 by default. Naming that shared bucket yourself does allow it, and the service then holds the key
 to the other installation's state as well: give each deployment its own bucket first.
 
+## Remove the installer
+
+Once your installation service is set up and you have saved its recovery credential, the installer
+has done its job. Updates come from the installation service, not the installer
+(`maintenance-jobs.ts`, `/update-preview`), so you can remove it:
+
+```sh
+export CLOUDFLARE_API_TOKEN
+export CLOUDFLARE_ACCOUNT_ID
+pnpm --filter @simple-agent-manager/installer run remove
+```
+
+This deletes the `sam-installer-self-hosted` Worker (`wrangler delete`, run by
+`apps/installer/scripts/remove.mjs`); Cloudflare deletes a Worker's Durable Object storage, here
+the installer's sessions, with it. Your SAM and its `sam-maintenance-…` installation service are
+not touched. Then delete the API token you created for the installer. If you served the installer
+on your own domain, check the domain's **Workers Routes** in the dashboard for a leftover
+`install.` route.
+
+The command leaves the installer's OAuth client in place. Without the installer Worker, which held
+its only secret, the client can't be used. Setting `REMOVE_OAUTH_CLIENT=true` deletes it as well,
+but we have not yet confirmed how Cloudflare then treats the access your installation received
+through that client's sign-in, so leave it unless you are also removing the installation.
+
 ## Remove an installation
 
 There is no automatic uninstall. To remove SAM, delete its Workers, storage and DNS records in the
-Cloudflare dashboard, then the `sam-maintenance-…` installation service, and revoke the
-installer's authorization in your Cloudflare profile. Keep any data you want first. Leftover
-Workers routes block a new installation on the same domain until you remove them.
+Cloudflare dashboard, then the `sam-maintenance-…` installation service and its API tokens, and
+[the installer](#remove-the-installer) with its OAuth client if you still have them. Keep any data
+you want first. Leftover Workers routes block a new installation on the same domain until you
+remove them.
+
+SAM and the installation service also own Cloudflare Container applications: the installation
+service's builder is one (`provision`, `apps/installer/src/provision.ts`), and SAM's own containers
+are others. Check that none are left, because we have not confirmed that Cloudflare removes a
+Worker's Container application together with the Worker:
+
+```sh
+npx wrangler containers list
+npx wrangler containers delete <APPLICATION_ID>
+```
 
 ## What the installer can access
 
-The hosted installer receives a short-lived Cloudflare OAuth token with the permissions you approve,
-for 15 minutes by default. At handoff it passes the work to the installation service in your
-account and drops its own copies. Deployment permissions can cover existing Workers in that
-account, not only SAM's. You can revoke the authorization from your Cloudflare profile at any time;
-that doesn't delete what was already created in your account. The installation service stores a
-hash of your recovery credential, not the credential itself.
+The installer runs in your Cloudflare account, and no service operated by the SAM project is
+involved. When you sign in, your installer receives a short-lived Cloudflare OAuth token with the
+permissions you approve, for 15 minutes by default (`SESSION_TTL_SECONDS`), and keeps it in an
+isolated session on the server side, never in the browser. With it the installer creates separate
+credentials for deploying SAM, for running it, and for its build storage
+(`createInstallationCredentials`, `apps/installer/src/credentials.ts`), hands them to the
+installation service, and drops its own copies. Deployment permissions can cover existing Workers
+in the account, not only SAM's. The installation service stores a hash of your recovery
+credential, not the credential itself.
 
-## Host the installer yourself
+The permissions the sign-in asks for are the ones an installation needs, including Workers, KV,
+R2, D1, Containers, Pages, DNS, certificates, Workers routes, Workers AI, AI Gateway, API tokens,
+email sending and routing, Cloudflare Tunnel, and Cloudflare Artifacts (the full list is
+`FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
 
-Self-hosting lets you review and pin the installer source, then run it in an account you control. You do not need to deploy the main SAM application to host the installer.
+## Installer options
 
-### Before you start
+Set these before running the deploy command.
 
-You need:
+### Use your own domain for the installer
 
-- A Cloudflare account with Workers Paid enabled, and a domain active in that account.
-- Node.js 22.23.4 or newer (or any Node.js 24+) and pnpm 9.15.9.
-- The [SAM repository](https://github.com/raphaeltm/simple-agent-manager), checked out at the version you want to trust.
-- A Cloudflare API token scoped to that account and zone, with Account Settings Read, Workers Scripts Edit, OAuth Client Read/Write, and permissions for Workers Custom Domains and Workers Routes. Review Cloudflare's current permission names before granting access.
+`BASE_DOMAIN=example.com` serves the installer at `https://install.example.com` instead of
+`workers.dev`. The API token then also needs the zone permissions for Workers Custom Domains and
+Workers Routes on that domain. An installer that already exists keeps its address when you deploy
+again without `BASE_DOMAIN`.
 
-### Deploy
+An installer is not moved in place: deploying an existing one with a different address stops and
+says so (`apps/installer/scripts/deploy.mjs`). To change its address, [remove it](#remove-the-installer)
+with `REMOVE_OAUTH_CLIENT=true` and deploy again.
 
-Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat. `INSTALLER_MODE=full` is what lets the installer install SAM; without it, a new installer starts in bootstrap mode and only creates the installation service.
+### Use prebuilt parts
 
-```sh
-pnpm install --frozen-lockfile
-export CLOUDFLARE_API_TOKEN
-export CLOUDFLARE_ACCOUNT_ID
-export BASE_DOMAIN=example.com
-export INSTALLER_MODE=full
-pnpm --filter @simple-agent-manager/installer run deploy
-```
+By default the installation service builds everything from the source commit you checked out, and
+downloads no prebuilt parts of SAM (`ARTIFACT_BASE_URL`, `apps/installer/scripts/deploy.mjs`).
 
-The deployment creates the installer at `https://install.example.com`, provisions its private OAuth client, and stores the client credentials as Worker secrets. It uses its own session storage and does not share marketing analytics or SAM login sessions.
+SAM's releases do carry prebuilt parts (the VM agent and container images), and
+`ARTIFACT_BASE_URL=https://…` makes the installation service use the ones that match the version
+being installed, which is quicker. It is off by default because those files are not yet signed: the
+installation service checks each one against the size and SHA-256 in a manifest that comes from the
+same release (`scripts/deploy/installer-engine-prebuilt.ts`), so turning it on trusts whatever is
+attached to that release, in addition to the source commit. Anything missing or different is still
+built from source.
 
-Open that address and sign in with Cloudflare. Private clients can only be authorized by members of the owning Cloudflare account. Public promotion is self-serve: supply a name, logo, client URL and scopes, verify the client URL's domain with a DNS TXT record, then change visibility to public. There is no approval queue, and promotion is permanent. See Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
-
-### What full mode asks for
-
-In full mode the installer's OAuth client asks for the broader permissions an installation needs: Workers, KV, R2, D1,
-Containers, DNS, certificates, Workers routes, AI Gateway, API tokens, email sending and routing,
-and Cloudflare Artifacts (the full list is `FULL_SCOPES` in `apps/installer/scripts/deploy.mjs`).
-Redeploying without `INSTALLER_MODE` keeps the deployed mode. The deployment publishes the installer
-before it creates or updates the OAuth client, so a token without OAuth Client write permission
-leaves an installer whose health check never reports `oauthConfigured`.
+An installer keeps the setting when you deploy it again without the variable.
+`ARTIFACT_BASE_URL=none` turns prebuilt parts off again.
 
 ### Use an existing OAuth client
 
-Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and, for bootstrap mode, the scopes `account-settings.read workers-scripts.write`. A full-mode installer's client needs every scope in `FULL_SCOPES` (see [What full mode asks for](#what-full-mode-asks-for)). Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot create the installation service Worker. Refresh tokens are not requested.
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. The client's name must be
+`sam-installer-self-hosted` and its client URL the installer's address, or the command stops
+(`prepareOAuth`, `apps/installer/scripts/deploy.mjs`). It uses Authorization Code with
+`client_secret_post`, the callback `<installer address>/oauth/callback`, and every scope in
+`FULL_SCOPES`; the command updates an existing client's scopes and callback to match. Do not use `workers-scripts.edit`: it is the Workers Editor role, which cannot
+create the installation service Worker. Refresh tokens are not requested.
 
-If initial client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply it through these variables before retrying. Rerunning deployment normally preserves the existing client and secrets.
+If client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply
+it through these variables before retrying.
 
-### Remove your installer
+### Bootstrap mode
 
-Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to installations you no longer need, and revoke outstanding installer authorizations. Installations it made are separate: they live on in the accounts they were installed into (see [Remove an installation](#remove-an-installation)). Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
+`INSTALLER_MODE=bootstrap` deploys an installer that only creates an empty installation service
+and cannot install SAM. An installer first deployed that way stays in that mode until you deploy it
+with `INSTALLER_MODE=full`.
 
 ## Inspect the code
 
-The standalone app, deployment configuration, tests, and developer README live in [`apps/installer`](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer). The hosted and self-hosted versions use this same app. Source visibility helps you audit it; it does not prevent a hosted operator from changing the running code.
+The installer, its deployment scripts, tests and developer README live in
+[`apps/installer`](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer).
+The installer's footer shows the commit it was deployed from.
